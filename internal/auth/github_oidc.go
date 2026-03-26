@@ -18,7 +18,7 @@ const (
 )
 
 type GitHubClaims struct {
-	Subject         string `json:"sub"`
+	Subject         string `json:"-"` // populated from jwt.Claims.Subject
 	Repository      string `json:"repository"`
 	RepositoryOwner string `json:"repository_owner"`
 	Workflow        string `json:"workflow"`

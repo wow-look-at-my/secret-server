@@ -32,12 +32,18 @@ func TestValidateTokenValid(t *testing.T) {
 		NotBefore:	jwt.NewNumericDate(time.Now().Add(-time.Minute)),
 		IssuedAt:	jwt.NewNumericDate(time.Now()),
 	}
-	customClaims := GitHubClaims{
-		Repository:		"myorg/myrepo",
-		RepositoryOwner:	"myorg",
-		Workflow:		"deploy",
-		Ref:			"refs/heads/main",
-		Environment:		"production",
+	customClaims := struct {
+		Repository      string `json:"repository"`
+		RepositoryOwner string `json:"repository_owner"`
+		Workflow        string `json:"workflow"`
+		Ref             string `json:"ref"`
+		Environment     string `json:"environment"`
+	}{
+		Repository:      "myorg/myrepo",
+		RepositoryOwner: "myorg",
+		Workflow:        "deploy",
+		Ref:             "refs/heads/main",
+		Environment:     "production",
 	}
 
 	token, err := jwt.Signed(signer).Claims(stdClaims).Claims(customClaims).Serialize()

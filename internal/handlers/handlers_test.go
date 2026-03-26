@@ -75,10 +75,14 @@ func makeOIDCToken(t *testing.T, jwk jose.JSONWebKey, repo, ref string) string {
 		NotBefore:	jwt.NewNumericDate(time.Now().Add(-time.Minute)),
 		IssuedAt:	jwt.NewNumericDate(time.Now()),
 	}
-	customClaims := map[string]string{
-		"repository":		repo,
-		"repository_owner":	strings.Split(repo, "/")[0],
-		"ref":			ref,
+	customClaims := struct {
+		Repository      string `json:"repository"`
+		RepositoryOwner string `json:"repository_owner"`
+		Ref             string `json:"ref"`
+	}{
+		Repository:      repo,
+		RepositoryOwner: strings.Split(repo, "/")[0],
+		Ref:             ref,
 	}
 	token, err := jwt.Signed(signer).Claims(stdClaims).Claims(customClaims).Serialize()
 	require.Nil(t, err)
