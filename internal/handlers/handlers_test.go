@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
