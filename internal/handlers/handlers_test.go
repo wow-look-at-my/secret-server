@@ -15,18 +15,20 @@ import (
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/wow-look-at-my/secret-server/internal/auth"
+	"github.com/wow-look-at-my/testify/assert"
+	"github.com/wow-look-at-my/testify/require"
 	"github.com/wow-look-at-my/secret-server/internal/crypto"
 	"github.com/wow-look-at-my/secret-server/internal/database"
 	"github.com/wow-look-at-my/secret-server/internal/templates"
 )
 
 type testEnv struct {
-	db   *database.DB
-	tmpl *templates.Templates
-	key  *rsa.PrivateKey
-	jwk  jose.JSONWebKey
-	pub  jose.JSONWebKey
-	oidc *auth.GitHubOIDCValidator
+	db	*database.DB
+	tmpl	*templates.Templates
+	key	*rsa.PrivateKey
+	jwk	jose.JSONWebKey
+	pub	jose.JSONWebKey
+	oidc	*auth.GitHubOIDCValidator
 }
 
 func setup(t *testing.T) *testEnv {
@@ -36,24 +38,19 @@ func setup(t *testing.T) *testEnv {
 		encKey[i] = byte(i)
 	}
 	enc, err := crypto.NewEncryptor(encKey)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
+
 	f, err := os.CreateTemp(t.TempDir(), "test-*.db")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
+
 	f.Close()
 	db, err := database.New(f.Name(), enc)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
+
 	t.Cleanup(func() { db.Close() })
 
 	tmpl, err := templates.New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
 
 	rsaKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 	jwk := jose.JSONWebKey{Key: rsaKey, KeyID: "test", Algorithm: "RS256"}
@@ -68,26 +65,24 @@ func setup(t *testing.T) *testEnv {
 func makeOIDCToken(t *testing.T, jwk jose.JSONWebKey, repo, ref string) string {
 	t.Helper()
 	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: jwk}, (&jose.SignerOptions{}).WithType("JWT"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
+
 	stdClaims := jwt.Claims{
-		Issuer:    "https://token.actions.githubusercontent.com",
-		Subject:   "repo:" + repo + ":ref:" + ref,
-		Audience:  jwt.Audience{"https://secrets.example.com"},
-		Expiry:    jwt.NewNumericDate(time.Now().Add(time.Hour)),
-		NotBefore: jwt.NewNumericDate(time.Now().Add(-time.Minute)),
-		IssuedAt:  jwt.NewNumericDate(time.Now()),
+		Issuer:		"https://token.actions.githubusercontent.com",
+		Subject:	"repo:" + repo + ":ref:" + ref,
+		Audience:	jwt.Audience{"https://secrets.example.com"},
+		Expiry:		jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		NotBefore:	jwt.NewNumericDate(time.Now().Add(-time.Minute)),
+		IssuedAt:	jwt.NewNumericDate(time.Now()),
 	}
 	customClaims := map[string]string{
-		"repository":       repo,
-		"repository_owner": strings.Split(repo, "/")[0],
-		"ref":              ref,
+		"repository":		repo,
+		"repository_owner":	strings.Split(repo, "/")[0],
+		"ref":			ref,
 	}
 	token, err := jwt.Signed(signer).Claims(stdClaims).Claims(customClaims).Serialize()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
+
 	return token
 }
 
@@ -101,9 +96,8 @@ func TestPublicFetchSecretsNoToken(t *testing.T) {
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want %d", rr.Code, http.StatusUnauthorized)
-	}
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+
 }
 
 func TestPublicFetchSecretsWithPolicy(t *testing.T) {
@@ -123,17 +117,13 @@ func TestPublicFetchSecretsWithPolicy(t *testing.T) {
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d, body: %s", rr.Code, http.StatusOK, rr.Body.String())
-	}
+	require.Equal(t, http.StatusOK, rr.Code)
 
 	var result map[string]string
-	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
-		t.Fatal(err)
-	}
-	if result["DB_URL"] != "postgres://localhost" {
-		t.Errorf("DB_URL = %q, want %q", result["DB_URL"], "postgres://localhost")
-	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &result))
+
+	assert.Equal(t, "postgres://localhost", result["DB_URL"])
+
 }
 
 func TestPublicFetchSecretsNoMatchingPolicy(t *testing.T) {
@@ -152,12 +142,10 @@ func TestPublicFetchSecretsNoMatchingPolicy(t *testing.T) {
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d", rr.Code)
-	}
-	if strings.TrimSpace(rr.Body.String()) != "{}" {
-		t.Errorf("body = %q, want empty JSON object", rr.Body.String())
-	}
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	assert.Equal(t, "{}", strings.TrimSpace(rr.Body.String()))
+
 }
 
 func TestAdminCreateAndDeleteSecret(t *testing.T) {
@@ -172,9 +160,8 @@ func TestAdminCreateAndDeleteSecret(t *testing.T) {
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("create status = %d, body: %s", rr.Code, rr.Body.String())
-	}
+	require.Equal(t, http.StatusCreated, rr.Code)
+
 	var created map[string]string
 	json.Unmarshal(rr.Body.Bytes(), &created)
 	id := created["id"]
@@ -183,9 +170,8 @@ func TestAdminCreateAndDeleteSecret(t *testing.T) {
 	req = httptest.NewRequest("DELETE", "/admin/v1/secrets/"+id, nil)
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
-	if rr.Code != http.StatusNoContent {
-		t.Errorf("delete status = %d", rr.Code)
-	}
+	assert.Equal(t, http.StatusNoContent, rr.Code)
+
 }
 
 func TestAdminCreateSecretMissingFields(t *testing.T) {
@@ -199,9 +185,8 @@ func TestAdminCreateSecretMissingFields(t *testing.T) {
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want %d", rr.Code, http.StatusBadRequest)
-	}
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+
 }
 
 func TestAdminUpdateSecret(t *testing.T) {
@@ -217,14 +202,11 @@ func TestAdminUpdateSecret(t *testing.T) {
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusNoContent {
-		t.Errorf("status = %d, want %d", rr.Code, http.StatusNoContent)
-	}
+	assert.Equal(t, http.StatusNoContent, rr.Code)
 
 	got, _ := env.db.GetSecret(s.ID)
-	if got.Value != "new" {
-		t.Errorf("Value = %q, want %q", got.Value, "new")
-	}
+	assert.Equal(t, "new", got.Value)
+
 }
 
 func TestAdminPolicyCRUD(t *testing.T) {
@@ -238,9 +220,8 @@ func TestAdminPolicyCRUD(t *testing.T) {
 	req := httptest.NewRequest("POST", "/admin/v1/policies", strings.NewReader(body))
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("create status = %d, body: %s", rr.Code, rr.Body.String())
-	}
+	require.Equal(t, http.StatusCreated, rr.Code)
+
 	var created map[string]string
 	json.Unmarshal(rr.Body.Bytes(), &created)
 	id := created["id"]
@@ -250,17 +231,14 @@ func TestAdminPolicyCRUD(t *testing.T) {
 	req = httptest.NewRequest("PUT", "/admin/v1/policies/"+id, strings.NewReader(body))
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
-	if rr.Code != http.StatusNoContent {
-		t.Errorf("update status = %d", rr.Code)
-	}
+	assert.Equal(t, http.StatusNoContent, rr.Code)
 
 	// Delete
 	req = httptest.NewRequest("DELETE", "/admin/v1/policies/"+id, nil)
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
-	if rr.Code != http.StatusNoContent {
-		t.Errorf("delete status = %d", rr.Code)
-	}
+	assert.Equal(t, http.StatusNoContent, rr.Code)
+
 }
 
 func TestUIPages(t *testing.T) {
@@ -273,9 +251,9 @@ func TestUIPages(t *testing.T) {
 	h.Register(mux)
 
 	pages := []struct {
-		method string
-		path   string
-		status int
+		method	string
+		path	string
+		status	int
 	}{
 		{"GET", "/ui/", http.StatusOK},
 		{"GET", "/ui/secrets", http.StatusOK},
@@ -289,9 +267,8 @@ func TestUIPages(t *testing.T) {
 		req := httptest.NewRequest(p.method, p.path, nil)
 		rr := httptest.NewRecorder()
 		mux.ServeHTTP(rr, req)
-		if rr.Code != p.status {
-			t.Errorf("%s %s: status = %d, want %d", p.method, p.path, rr.Code, p.status)
-		}
+		assert.Equal(t, p.status, rr.Code)
+
 	}
 }
 

@@ -1,12 +1,15 @@
 package database
 
-import "testing"
+import (
+	"testing"
+	"github.com/wow-look-at-my/testify/assert"
+)
 
 func TestMatchGlob(t *testing.T) {
 	tests := []struct {
-		pattern string
-		value   string
-		want    bool
+		pattern	string
+		value	string
+		want	bool
 	}{
 		{"*", "anything", true},
 		{"*", "org/repo", true},
@@ -22,12 +25,9 @@ func TestMatchGlob(t *testing.T) {
 
 	for _, tt := range tests {
 		got, err := matchGlob(tt.pattern, tt.value)
-		if err != nil {
-			t.Errorf("matchGlob(%q, %q) error: %v", tt.pattern, tt.value, err)
-			continue
-		}
-		if got != tt.want {
-			t.Errorf("matchGlob(%q, %q) = %v, want %v", tt.pattern, tt.value, got, tt.want)
-		}
+		assert.Nil(t, err)
+
+		assert.Equal(t, tt.want, got)
+
 	}
 }

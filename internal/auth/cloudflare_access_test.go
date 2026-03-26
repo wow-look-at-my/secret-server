@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/go-jose/go-jose/v4"
+	"github.com/wow-look-at-my/testify/assert"
+	"github.com/wow-look-at-my/testify/require"
 	"github.com/go-jose/go-jose/v4/jwt"
 )
 
@@ -22,9 +24,8 @@ func TestRequireCFAccessNoToken(t *testing.T) {
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want %d", rr.Code, http.StatusUnauthorized)
-	}
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+
 }
 
 func TestValidateRequestFromHeader(t *testing.T) {
@@ -42,21 +43,17 @@ func TestValidateRequestFromHeader(t *testing.T) {
 	defer ts.Close()
 
 	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: jwk}, (&jose.SignerOptions{}).WithType("JWT"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
 
 	claims := jwt.Claims{
-		Issuer:    "test",
-		Audience:  jwt.Audience{"test-aud"},
-		Expiry:    jwt.NewNumericDate(time.Now().Add(time.Hour)),
-		NotBefore: jwt.NewNumericDate(time.Now().Add(-time.Minute)),
-		IssuedAt:  jwt.NewNumericDate(time.Now()),
+		Issuer:		"test",
+		Audience:	jwt.Audience{"test-aud"},
+		Expiry:		jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		NotBefore:	jwt.NewNumericDate(time.Now().Add(-time.Minute)),
+		IssuedAt:	jwt.NewNumericDate(time.Now()),
 	}
 	token, err := jwt.Signed(signer).Claims(claims).Serialize()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
 
 	v := NewCloudflareAccessValidator("team", "test-aud")
 	v.jwks = &jose.JSONWebKeySet{Keys: []jose.JSONWebKey{pubJWK}}
@@ -66,9 +63,8 @@ func TestValidateRequestFromHeader(t *testing.T) {
 	req.Header.Set("Cf-Access-Jwt-Assertion", token)
 
 	err = v.ValidateRequest(req)
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
+	assert.Nil(t, err)
+
 }
 
 func TestValidateRequestFromCookie(t *testing.T) {
@@ -78,10 +74,10 @@ func TestValidateRequestFromCookie(t *testing.T) {
 
 	signer, _ := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: jwk}, (&jose.SignerOptions{}).WithType("JWT"))
 	claims := jwt.Claims{
-		Audience:  jwt.Audience{"aud"},
-		Expiry:    jwt.NewNumericDate(time.Now().Add(time.Hour)),
-		NotBefore: jwt.NewNumericDate(time.Now().Add(-time.Minute)),
-		IssuedAt:  jwt.NewNumericDate(time.Now()),
+		Audience:	jwt.Audience{"aud"},
+		Expiry:		jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		NotBefore:	jwt.NewNumericDate(time.Now().Add(-time.Minute)),
+		IssuedAt:	jwt.NewNumericDate(time.Now()),
 	}
 	token, _ := jwt.Signed(signer).Claims(claims).Serialize()
 
@@ -93,9 +89,8 @@ func TestValidateRequestFromCookie(t *testing.T) {
 	req.AddCookie(&http.Cookie{Name: "CF_Authorization", Value: token})
 
 	err := v.ValidateRequest(req)
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
+	assert.Nil(t, err)
+
 }
 
 func TestValidateRequestExpired(t *testing.T) {
@@ -105,10 +100,10 @@ func TestValidateRequestExpired(t *testing.T) {
 
 	signer, _ := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: jwk}, (&jose.SignerOptions{}).WithType("JWT"))
 	claims := jwt.Claims{
-		Audience:  jwt.Audience{"aud"},
-		Expiry:    jwt.NewNumericDate(time.Now().Add(-time.Hour)),
-		NotBefore: jwt.NewNumericDate(time.Now().Add(-2 * time.Hour)),
-		IssuedAt:  jwt.NewNumericDate(time.Now().Add(-2 * time.Hour)),
+		Audience:	jwt.Audience{"aud"},
+		Expiry:		jwt.NewNumericDate(time.Now().Add(-time.Hour)),
+		NotBefore:	jwt.NewNumericDate(time.Now().Add(-2 * time.Hour)),
+		IssuedAt:	jwt.NewNumericDate(time.Now().Add(-2 * time.Hour)),
 	}
 	token, _ := jwt.Signed(signer).Claims(claims).Serialize()
 
@@ -120,9 +115,8 @@ func TestValidateRequestExpired(t *testing.T) {
 	req.Header.Set("Cf-Access-Jwt-Assertion", token)
 
 	err := v.ValidateRequest(req)
-	if err == nil {
-		t.Fatal("expected error for expired token")
-	}
+	require.NotNil(t, err)
+
 }
 
 func TestValidateRequestWrongAudience(t *testing.T) {
@@ -132,10 +126,10 @@ func TestValidateRequestWrongAudience(t *testing.T) {
 
 	signer, _ := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: jwk}, (&jose.SignerOptions{}).WithType("JWT"))
 	claims := jwt.Claims{
-		Audience:  jwt.Audience{"wrong-aud"},
-		Expiry:    jwt.NewNumericDate(time.Now().Add(time.Hour)),
-		NotBefore: jwt.NewNumericDate(time.Now().Add(-time.Minute)),
-		IssuedAt:  jwt.NewNumericDate(time.Now()),
+		Audience:	jwt.Audience{"wrong-aud"},
+		Expiry:		jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		NotBefore:	jwt.NewNumericDate(time.Now().Add(-time.Minute)),
+		IssuedAt:	jwt.NewNumericDate(time.Now()),
 	}
 	token, _ := jwt.Signed(signer).Claims(claims).Serialize()
 
@@ -147,7 +141,6 @@ func TestValidateRequestWrongAudience(t *testing.T) {
 	req.Header.Set("Cf-Access-Jwt-Assertion", token)
 
 	err := v.ValidateRequest(req)
-	if err == nil {
-		t.Fatal("expected error for wrong audience")
-	}
+	require.NotNil(t, err)
+
 }
