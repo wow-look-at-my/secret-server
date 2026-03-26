@@ -35,10 +35,23 @@ func main() {
 	}
 	defer db.Close()
 
+	mux, err := buildMux(db, cfg)
+	if err != nil {
+		slog.Error("failed to build routes", "error", err)
+		os.Exit(1)
+	}
+
+	slog.Info("starting server", "addr", cfg.ListenAddr)
+	if err := http.ListenAndServe(cfg.ListenAddr, mux); err != nil {
+		slog.Error("server failed", "error", err)
+		os.Exit(1)
+	}
+}
+
+func buildMux(db *database.DB, cfg *config.Config) (*http.ServeMux, error) {
 	tmpl, err := templates.New()
 	if err != nil {
-		slog.Error("failed to parse templates", "error", err)
-		os.Exit(1)
+		return nil, err
 	}
 
 	oidcValidator := auth.NewGitHubOIDCValidator(cfg.OIDCAudience)
@@ -77,11 +90,7 @@ func main() {
 		http.NotFound(w, r)
 	})
 
-	slog.Info("starting server", "addr", cfg.ListenAddr)
-	if err := http.ListenAndServe(cfg.ListenAddr, mux); err != nil {
-		slog.Error("server failed", "error", err)
-		os.Exit(1)
-	}
+	return mux, nil
 }
 
 func setupLogging(level string) {
