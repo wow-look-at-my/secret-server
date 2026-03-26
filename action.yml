@@ -1,0 +1,50 @@
+name: 'Fetch Secrets'
+description: 'Fetch secrets from a self-hosted secret server using GitHub Actions OIDC'
+
+inputs:
+  url:
+    description: 'Base URL of the secret server (e.g. https://secrets.example.com)'
+    required: true
+  audience:
+    description: 'OIDC audience for the secret server (defaults to the URL)'
+    required: false
+
+outputs:
+  secrets:
+    description: 'JSON object of secrets'
+    value: ${{ steps.fetch.outputs.secrets }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Fetch OIDC token and secrets
+      id: fetch
+      shell: bash
+      env:
+        SECRET_SERVER_URL: ${{ inputs.url }}
+        SECRET_SERVER_AUDIENCE: ${{ inputs.audience }}
+      run: |
+        AUDIENCE="${SECRET_SERVER_AUDIENCE:-$SECRET_SERVER_URL}"
+
+        # Request OIDC token from GitHub
+        OIDC_TOKEN=$(curl -s -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+          "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${AUDIENCE}" | jq -r '.value')
+
+        if [ -z "$OIDC_TOKEN" ] || [ "$OIDC_TOKEN" = "null" ]; then
+          echo "::error::Failed to obtain OIDC token"
+          exit 1
+        fi
+
+        # Fetch secrets from the server
+        SECRETS=$(curl -s -f -H "Authorization: Bearer ${OIDC_TOKEN}" \
+          "${SECRET_SERVER_URL}/public/v1/secrets")
+
+        if [ $? -ne 0 ]; then
+          echo "::error::Failed to fetch secrets from server"
+          exit 1
+        fi
+
+        echo "secrets=${SECRETS}" >> "$GITHUB_OUTPUT"
+
+        # Export each secret as an environment variable
+        echo "${SECRETS}" | jq -r 'to_entries[] | "\(.key)=\(.value)"' >> "$GITHUB_ENV"

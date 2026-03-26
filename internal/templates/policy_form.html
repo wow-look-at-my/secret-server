@@ -1,0 +1,50 @@
+{{template "head" .}}
+{{define "title"}}{{if .IsNew}}New Policy{{else}}Edit Policy{{end}} - Secret Server{{end}}
+
+<h1>{{if .IsNew}}New Policy{{else}}Edit Policy{{end}}</h1>
+
+{{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+
+<form method="post" action="{{if .IsNew}}/ui/policies{{else}}/ui/policies/{{.Policy.ID}}{{end}}">
+    <div class="form-group">
+        <label for="name">Name</label>
+        <input type="text" id="name" name="name" required
+            value="{{if .IsNew}}{{else}}{{.Policy.Name}}{{end}}"
+            placeholder="e.g. Allow myapp prod deploys">
+    </div>
+
+    <div class="form-group">
+        <label for="repository_pattern">Repository Pattern</label>
+        <input type="text" id="repository_pattern" name="repository_pattern" required
+            value="{{if .IsNew}}{{else}}{{.Policy.RepositoryPattern}}{{end}}"
+            placeholder="e.g. wow-look-at-my/* or owner/repo">
+    </div>
+
+    <div class="form-group">
+        <label for="ref_pattern">Ref Pattern</label>
+        <input type="text" id="ref_pattern" name="ref_pattern"
+            value="{{if .IsNew}}*{{else}}{{.Policy.RefPattern}}{{end}}"
+            placeholder="e.g. refs/heads/main or *">
+    </div>
+
+    <div class="form-group">
+        <label for="project">Project</label>
+        <input type="text" id="project" name="project" required
+            value="{{if .IsNew}}{{else}}{{.Policy.Project}}{{end}}"
+            placeholder="e.g. myapp">
+    </div>
+
+    <div class="form-group">
+        <label for="environment">Environment</label>
+        <input type="text" id="environment" name="environment" required
+            value="{{if .IsNew}}{{else}}{{.Policy.Environment}}{{end}}"
+            placeholder="e.g. prod">
+    </div>
+
+    <div class="actions">
+        <button type="submit" class="btn btn-primary">{{if .IsNew}}Create{{else}}Update{{end}}</button>
+        <a href="/ui/policies" class="btn">Cancel</a>
+    </div>
+</form>
+
+{{template "foot" .}}

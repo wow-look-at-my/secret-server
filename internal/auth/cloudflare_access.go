@@ -1,0 +1,136 @@
+package auth
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"sync"
+	"time"
+
+	"github.com/go-jose/go-jose/v4"
+	"github.com/go-jose/go-jose/v4/jwt"
+)
+
+type CloudflareAccessValidator struct {
+	teamDomain string
+	audience   string
+	mu         sync.RWMutex
+	jwks       *jose.JSONWebKeySet
+	fetched    time.Time
+}
+
+func NewCloudflareAccessValidator(teamDomain, audience string) *CloudflareAccessValidator {
+	return &CloudflareAccessValidator{
+		teamDomain: teamDomain,
+		audience:   audience,
+	}
+}
+
+func (v *CloudflareAccessValidator) ValidateRequest(r *http.Request) error {
+	token := r.Header.Get("Cf-Access-Jwt-Assertion")
+	if token == "" {
+		if cookie, err := r.Cookie("CF_Authorization"); err == nil {
+			token = cookie.Value
+		}
+	}
+	if token == "" {
+		return fmt.Errorf("no CF Access token found")
+	}
+
+	keys, err := v.getKeys(r.Context())
+	if err != nil {
+		return fmt.Errorf("get CF JWKS: %w", err)
+	}
+
+	tok, err := jwt.ParseSigned(token, []jose.SignatureAlgorithm{jose.RS256})
+	if err != nil {
+		return fmt.Errorf("parse CF JWT: %w", err)
+	}
+
+	var found *jose.JSONWebKey
+	for _, header := range tok.Headers {
+		if header.KeyID != "" {
+			matches := keys.Key(header.KeyID)
+			if len(matches) > 0 {
+				found = &matches[0]
+				break
+			}
+		}
+	}
+	if found == nil {
+		return fmt.Errorf("no matching key found in CF JWKS")
+	}
+
+	stdClaims := jwt.Claims{}
+	if err := tok.Claims(found.Key, &stdClaims); err != nil {
+		return fmt.Errorf("verify CF claims: %w", err)
+	}
+
+	expected := jwt.Expected{
+		Time:        time.Now(),
+		AnyAudience: []string{v.audience},
+	}
+	if err := stdClaims.Validate(expected); err != nil {
+		return fmt.Errorf("validate CF claims: %w", err)
+	}
+
+	return nil
+}
+
+func (v *CloudflareAccessValidator) RequireCFAccess(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := v.ValidateRequest(r); err != nil {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (v *CloudflareAccessValidator) getKeys(ctx context.Context) (*jose.JSONWebKeySet, error) {
+	v.mu.RLock()
+	if v.jwks != nil && time.Since(v.fetched) < jwksCacheTTL {
+		defer v.mu.RUnlock()
+		return v.jwks, nil
+	}
+	v.mu.RUnlock()
+
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if v.jwks != nil && time.Since(v.fetched) < jwksCacheTTL {
+		return v.jwks, nil
+	}
+
+	jwksURL := fmt.Sprintf("https://%s.cloudflareaccess.com/cdn-cgi/access/certs", v.teamDomain)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, jwksURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create CF JWKS request: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch CF JWKS: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var raw struct {
+		Keys []json.RawMessage `json:"keys"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return nil, fmt.Errorf("decode CF JWKS: %w", err)
+	}
+
+	var jwks jose.JSONWebKeySet
+	for _, keyData := range raw.Keys {
+		var jwk jose.JSONWebKey
+		if err := jwk.UnmarshalJSON(keyData); err != nil {
+			continue
+		}
+		jwks.Keys = append(jwks.Keys, jwk)
+	}
+
+	v.jwks = &jwks
+	v.fetched = time.Now()
+	return &jwks, nil
+}
