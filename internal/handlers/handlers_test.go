@@ -276,5 +276,198 @@ func TestUIPages(t *testing.T) {
 	}
 }
 
-// Unused import guard
-var _ = context.Background
+func TestUISecretCreateEditDelete(t *testing.T) {
+	env := setup(t)
+	h := NewUIHandler(env.db, env.tmpl)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	// Create via form
+	form := "key=MY_KEY&value=my_secret&project=testproj&environment=staging"
+	req := httptest.NewRequest("POST", "/ui/secrets", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusSeeOther, rr.Code)
+
+	// List to get the secret
+	secrets, _ := env.db.ListSecrets("testproj", "staging")
+	require.Equal(t, 1, len(secrets))
+	id := secrets[0].ID
+
+	// Edit page
+	req = httptest.NewRequest("GET", "/ui/secrets/"+id+"/edit", nil)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	// Update via form
+	form = "key=MY_KEY&value=updated_secret&project=testproj&environment=staging"
+	req = httptest.NewRequest("POST", "/ui/secrets/"+id, strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusSeeOther, rr.Code)
+
+	// Verify update
+	got, _ := env.db.GetSecret(id)
+	assert.Equal(t, "updated_secret", got.Value)
+
+	// Delete via form
+	req = httptest.NewRequest("POST", "/ui/secrets/"+id+"/delete", nil)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusSeeOther, rr.Code)
+
+	// Verify deletion
+	got, _ = env.db.GetSecret(id)
+	assert.Nil(t, got)
+}
+
+func TestUIPolicyCreateEditDelete(t *testing.T) {
+	env := setup(t)
+	h := NewUIHandler(env.db, env.tmpl)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	// Create via form
+	form := "name=Test+Policy&repository_pattern=org/*&ref_pattern=*&project=app&environment=prod"
+	req := httptest.NewRequest("POST", "/ui/policies", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusSeeOther, rr.Code)
+
+	// List to get the policy
+	policies, _ := env.db.ListPolicies()
+	require.Equal(t, 1, len(policies))
+	id := policies[0].ID
+
+	// Edit page
+	req = httptest.NewRequest("GET", "/ui/policies/"+id+"/edit", nil)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	// Update via form
+	form = "name=Updated+Policy&repository_pattern=org/*&ref_pattern=refs/heads/main&project=app&environment=staging"
+	req = httptest.NewRequest("POST", "/ui/policies/"+id, strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusSeeOther, rr.Code)
+
+	// Verify update
+	got, _ := env.db.GetPolicy(id)
+	assert.Equal(t, "Updated Policy", got.Name)
+	assert.Equal(t, "staging", got.Environment)
+
+	// Delete via form
+	req = httptest.NewRequest("POST", "/ui/policies/"+id+"/delete", nil)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusSeeOther, rr.Code)
+
+	// Verify deletion
+	got, _ = env.db.GetPolicy(id)
+	assert.Nil(t, got)
+}
+
+func TestUIEditSecretNotFound(t *testing.T) {
+	env := setup(t)
+	h := NewUIHandler(env.db, env.tmpl)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	req := httptest.NewRequest("GET", "/ui/secrets/nonexistent/edit", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+func TestUIEditPolicyNotFound(t *testing.T) {
+	env := setup(t)
+	h := NewUIHandler(env.db, env.tmpl)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	req := httptest.NewRequest("GET", "/ui/policies/nonexistent/edit", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+func TestUIPolicyCreateDefaultRefPattern(t *testing.T) {
+	env := setup(t)
+	h := NewUIHandler(env.db, env.tmpl)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	// Create without ref_pattern — should default to "*"
+	form := "name=NoRef&repository_pattern=org/*&project=app&environment=prod"
+	req := httptest.NewRequest("POST", "/ui/policies", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusSeeOther, rr.Code)
+
+	policies, _ := env.db.ListPolicies()
+	require.Equal(t, 1, len(policies))
+	assert.Equal(t, "*", policies[0].RefPattern)
+}
+
+func TestAdminCreatePolicyMissingFields(t *testing.T) {
+	env := setup(t)
+	h := NewAdminHandler(env.db)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	body := `{"name":"test"}`
+	req := httptest.NewRequest("POST", "/admin/v1/policies", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestAdminCreatePolicyDefaultRefPattern(t *testing.T) {
+	env := setup(t)
+	h := NewAdminHandler(env.db)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	body := `{"name":"test","repository_pattern":"org/*","project":"app","environment":"prod"}`
+	req := httptest.NewRequest("POST", "/admin/v1/policies", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusCreated, rr.Code)
+
+	policies, _ := env.db.ListPolicies()
+	assert.Equal(t, "*", policies[0].RefPattern)
+}
+
+func TestAdminInvalidJSON(t *testing.T) {
+	env := setup(t)
+	h := NewAdminHandler(env.db)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	req := httptest.NewRequest("POST", "/admin/v1/secrets", strings.NewReader("not json"))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+
+	req = httptest.NewRequest("POST", "/admin/v1/policies", strings.NewReader("not json"))
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+
+	req = httptest.NewRequest("PUT", "/admin/v1/secrets/someid", strings.NewReader("not json"))
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+
+	req = httptest.NewRequest("PUT", "/admin/v1/policies/someid", strings.NewReader("not json"))
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
