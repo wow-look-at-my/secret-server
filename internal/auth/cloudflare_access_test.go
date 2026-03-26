@@ -226,6 +226,39 @@ func TestValidateRequestInvalidJWT(t *testing.T) {
 	require.NotNil(t, err)
 }
 
+func TestCFAccessGetKeysFromServer(t *testing.T) {
+	key, _ := rsa.GenerateKey(rand.Reader, 2048)
+	pubJWK := jose.JSONWebKey{Key: &key.PublicKey, KeyID: "srv", Algorithm: "RS256"}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, _ := pubJWK.MarshalJSON()
+		w.Write([]byte(`{"keys":[` + string(data) + `]}`))
+	}))
+	defer ts.Close()
+
+	v := NewCloudflareAccessValidator("team", "aud")
+	v.certsURL = ts.URL
+
+	keys, err := v.getKeys(context.Background())
+	require.Nil(t, err)
+	require.Equal(t, 1, len(keys.Keys))
+	assert.Equal(t, "srv", keys.Keys[0].KeyID)
+}
+
+func TestCFAccessGetKeysDoubleCheckCache(t *testing.T) {
+	key, _ := rsa.GenerateKey(rand.Reader, 2048)
+	pubJWK := jose.JSONWebKey{Key: &key.PublicKey, KeyID: "dc", Algorithm: "RS256"}
+
+	v := NewCloudflareAccessValidator("team", "aud")
+	v.jwks = &jose.JSONWebKeySet{Keys: []jose.JSONWebKey{pubJWK}}
+	v.fetched = time.Now()
+
+	// Should return cached keys without network call
+	keys, err := v.getKeys(context.Background())
+	require.Nil(t, err)
+	assert.Equal(t, "dc", keys.Keys[0].KeyID)
+}
+
 func TestValidateRequestNoMatchingKey(t *testing.T) {
 	key, _ := rsa.GenerateKey(rand.Reader, 2048)
 	jwk := jose.JSONWebKey{Key: key, KeyID: "signing-key", Algorithm: "RS256"}

@@ -27,15 +27,19 @@ type GitHubClaims struct {
 }
 
 type GitHubOIDCValidator struct {
-	audience string
-	mu       sync.RWMutex
-	jwks     *jose.JSONWebKeySet
-	fetched  time.Time
-	jwksURL  string
+	audience     string
+	discoveryURL string
+	mu           sync.RWMutex
+	jwks         *jose.JSONWebKeySet
+	fetched      time.Time
+	jwksURL      string
 }
 
 func NewGitHubOIDCValidator(audience string) *GitHubOIDCValidator {
-	return &GitHubOIDCValidator{audience: audience}
+	return &GitHubOIDCValidator{
+		audience:     audience,
+		discoveryURL: githubOIDCDiscovery,
+	}
 }
 
 func (v *GitHubOIDCValidator) ValidateToken(ctx context.Context, tokenString string) (*GitHubClaims, error) {
@@ -133,7 +137,7 @@ func (v *GitHubOIDCValidator) discoverJWKS(ctx context.Context) (string, error) 
 		return v.jwksURL, nil
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, githubOIDCDiscovery, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, v.discoveryURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("create discovery request: %w", err)
 	}

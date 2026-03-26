@@ -164,5 +164,90 @@ func TestDiscoverAndFetchJWKS(t *testing.T) {
 	require.Equal(t, 1, len(keys.Keys))
 
 	assert.Equal(t, "dk", keys.Keys[0].KeyID)
+}
 
+func TestDiscoverJWKSFullFlow(t *testing.T) {
+	key, _ := rsa.GenerateKey(rand.Reader, 2048)
+	pubJWK := jose.JSONWebKey{Key: &key.PublicKey, KeyID: "full", Algorithm: "RS256"}
+	jwks := jose.JSONWebKeySet{Keys: []jose.JSONWebKey{pubJWK}}
+
+	jwksServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(jwks)
+	}))
+	defer jwksServer.Close()
+
+	discoveryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{"jwks_uri": jwksServer.URL})
+	}))
+	defer discoveryServer.Close()
+
+	v := NewGitHubOIDCValidator("aud")
+	v.discoveryURL = discoveryServer.URL
+
+	keys, err := v.getKeys(context.Background())
+	require.Nil(t, err)
+	require.Equal(t, 1, len(keys.Keys))
+	assert.Equal(t, "full", keys.Keys[0].KeyID)
+}
+
+func TestDiscoverJWKSEmptyURI(t *testing.T) {
+	discoveryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{"jwks_uri": ""})
+	}))
+	defer discoveryServer.Close()
+
+	v := NewGitHubOIDCValidator("aud")
+	v.discoveryURL = discoveryServer.URL
+
+	_, err := v.getKeys(context.Background())
+	require.NotNil(t, err)
+	assert.Contains(t, err.Error(), "empty jwks_uri")
+}
+
+func TestDiscoverJWKSBadDiscoveryResponse(t *testing.T) {
+	discoveryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("not json"))
+	}))
+	defer discoveryServer.Close()
+
+	v := NewGitHubOIDCValidator("aud")
+	v.discoveryURL = discoveryServer.URL
+
+	_, err := v.getKeys(context.Background())
+	require.NotNil(t, err)
+	assert.Contains(t, err.Error(), "decode discovery doc")
+}
+
+func TestGetKeysCacheExpiry(t *testing.T) {
+	key, _ := rsa.GenerateKey(rand.Reader, 2048)
+	pubJWK := jose.JSONWebKey{Key: &key.PublicKey, KeyID: "fresh", Algorithm: "RS256"}
+	jwks := jose.JSONWebKeySet{Keys: []jose.JSONWebKey{pubJWK}}
+
+	jwksServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(jwks)
+	}))
+	defer jwksServer.Close()
+
+	v := NewGitHubOIDCValidator("aud")
+	// Set expired cache
+	oldKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	oldPub := jose.JSONWebKey{Key: &oldKey.PublicKey, KeyID: "old", Algorithm: "RS256"}
+	v.jwks = &jose.JSONWebKeySet{Keys: []jose.JSONWebKey{oldPub}}
+	v.fetched = time.Now().Add(-2 * time.Hour)
+	v.jwksURL = jwksServer.URL
+
+	keys, err := v.getKeys(context.Background())
+	require.Nil(t, err)
+	assert.Equal(t, "fresh", keys.Keys[0].KeyID)
+}
+
+func TestValidateTokenInvalidJWT(t *testing.T) {
+	v := NewGitHubOIDCValidator("aud")
+	v.jwks = &jose.JSONWebKeySet{Keys: []jose.JSONWebKey{}}
+	v.fetched = time.Now()
+	v.jwksURL = "cached"
+
+	_, err := v.ValidateToken(context.Background(), "not-a-jwt")
+	require.NotNil(t, err)
+	assert.Contains(t, err.Error(), "parse JWT")
 }

@@ -15,6 +15,7 @@ import (
 type CloudflareAccessValidator struct {
 	teamDomain string
 	audience   string
+	certsURL   string
 	mu         sync.RWMutex
 	jwks       *jose.JSONWebKeySet
 	fetched    time.Time
@@ -103,7 +104,10 @@ func (v *CloudflareAccessValidator) getKeys(ctx context.Context) (*jose.JSONWebK
 		return v.jwks, nil
 	}
 
-	jwksURL := fmt.Sprintf("https://%s.cloudflareaccess.com/cdn-cgi/access/certs", v.teamDomain)
+	jwksURL := v.certsURL
+	if jwksURL == "" {
+		jwksURL = fmt.Sprintf("https://%s.cloudflareaccess.com/cdn-cgi/access/certs", v.teamDomain)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, jwksURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create CF JWKS request: %w", err)
