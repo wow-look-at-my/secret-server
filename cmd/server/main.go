@@ -63,31 +63,37 @@ func buildMux(db *database.DB, cfg *config.Config) (*http.ServeMux, error) {
 	publicHandler := handlers.NewPublicHandler(db, oidcValidator)
 	publicHandler.Register(mux)
 
-	// Admin API — behind CF Access
-	adminMux := http.NewServeMux()
-	adminHandler := handlers.NewAdminHandler(db)
-	adminHandler.Register(adminMux)
-	mux.Handle("/admin/", cfValidator.RequireCFAccess(adminMux))
-
-	// UI — behind CF Access
-	uiMux := http.NewServeMux()
-	uiHandler := handlers.NewUIHandler(db, tmpl)
-	uiHandler.Register(uiMux)
-	mux.Handle("/ui/", cfValidator.RequireCFAccess(uiMux))
-
-	// Health check
+	// Health check (register before catch-all patterns)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	})
 
+	// Admin API — behind CF Access
+	cfAdmin := cfValidator.RequireCFAccess(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		adminMux := http.NewServeMux()
+		adminHandler := handlers.NewAdminHandler(db)
+		adminHandler.Register(adminMux)
+		adminMux.ServeHTTP(w, r)
+	}))
+	mux.HandleFunc("POST /admin/v1/secrets", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
+	mux.HandleFunc("PUT /admin/v1/secrets/{id}", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
+	mux.HandleFunc("DELETE /admin/v1/secrets/{id}", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
+	mux.HandleFunc("POST /admin/v1/policies", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
+	mux.HandleFunc("PUT /admin/v1/policies/{id}", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
+	mux.HandleFunc("DELETE /admin/v1/policies/{id}", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
+
+	// UI — behind CF Access
+	uiMux := http.NewServeMux()
+	uiHandler := handlers.NewUIHandler(db, tmpl)
+	uiHandler.Register(uiMux)
+	cfUI := cfValidator.RequireCFAccess(uiMux)
+	mux.HandleFunc("GET /ui/", func(w http.ResponseWriter, r *http.Request) { cfUI.ServeHTTP(w, r) })
+	mux.HandleFunc("POST /ui/", func(w http.ResponseWriter, r *http.Request) { cfUI.ServeHTTP(w, r) })
+
 	// Redirect root to UI
-	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" {
-			http.Redirect(w, r, "/ui/", http.StatusFound)
-			return
-		}
-		http.NotFound(w, r)
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/ui/", http.StatusFound)
 	})
 
 	return mux, nil
