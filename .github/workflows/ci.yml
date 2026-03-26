@@ -8,4 +8,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: wow-look-at-my/go-toolchain@claude/restore-github-action-hQEJ7
+      - name: Install and run go-toolchain
+        env:
+          GONOSUMCHECK: "*"
+          GONOSUMDB: "*"
+          GOPRIVATE: "github.com/wow-look-at-my/*"
+          GOFLAGS: "-buildvcs=true"
+          GH_TOKEN: ${{ secrets.PRIVATE_ORG_REPO_READ }}
+        run: |
+          curl -fsSL -o /usr/local/bin/go-toolchain \
+            https://github.com/wow-look-at-my/go-toolchain/releases/latest/download/go-toolchain_linux_amd64
+          chmod +x /usr/local/bin/go-toolchain
+          git config --global url."https://${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
+          go-toolchain
