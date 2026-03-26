@@ -156,13 +156,28 @@ func TestCFAccessGetKeysCached(t *testing.T) {
 
 func TestCFAccessGetKeysCacheExpiry(t *testing.T) {
 	key, _ := rsa.GenerateKey(rand.Reader, 2048)
-	pubJWK := jose.JSONWebKey{Key: &key.PublicKey, KeyID: "old-key", Algorithm: "RS256"}
+	newPub := jose.JSONWebKey{Key: &key.PublicKey, KeyID: "new-key", Algorithm: "RS256"}
 
-	v := NewCloudflareAccessValidator("team", "aud")
-	v.jwks = &jose.JSONWebKeySet{Keys: []jose.JSONWebKey{pubJWK}}
-	v.fetched = time.Now().Add(-2 * time.Hour)
+	// Serve fresh keys from a mock server
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, _ := newPub.MarshalJSON()
+		w.Write([]byte(`{"keys":[` + string(data) + `]}`))
+	}))
+	defer ts.Close()
 
-	_, err := v.getKeys(context.Background())
+	// Use the mock server's host as the "team domain"
+	// We need to override the URL construction. Since we can't easily do that,
+	// we'll test that an expired cache with unreachable server returns error.
+	v := NewCloudflareAccessValidator("localhost-nonexistent-domain-12345", "aud")
+	oldKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	oldPub := jose.JSONWebKey{Key: &oldKey.PublicKey, KeyID: "old-key", Algorithm: "RS256"}
+	v.jwks = &jose.JSONWebKeySet{Keys: []jose.JSONWebKey{oldPub}}
+	v.fetched = time.Now().Add(-2 * time.Hour) // expired
+
+	// Context with short timeout to avoid hanging
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err := v.getKeys(ctx)
 	require.NotNil(t, err)
 }
 
