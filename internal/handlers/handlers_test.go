@@ -470,3 +470,91 @@ func TestAdminInvalidJSON(t *testing.T) {
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
+
+func TestUIDashboardRedirectBadPath(t *testing.T) {
+	env := setup(t)
+	h := NewUIHandler(env.db, env.tmpl)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	req := httptest.NewRequest("GET", "/ui/something-else", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	// The dashboard handler redirects non-/ui/ paths
+	assert.Equal(t, http.StatusFound, rr.Code)
+	assert.Equal(t, "/ui/", rr.Header().Get("Location"))
+}
+
+func TestUISecretCreateDuplicate(t *testing.T) {
+	env := setup(t)
+	env.db.CreateSecret("DUP_KEY", "val", "proj", "env")
+
+	h := NewUIHandler(env.db, env.tmpl)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	// Try to create duplicate — should render form with error
+	form := "key=DUP_KEY&value=val2&project=proj&environment=env"
+	req := httptest.NewRequest("POST", "/ui/secrets", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	// Should show the form again (200 with error), not redirect
+	assert.Equal(t, http.StatusOK, rr.Code)
+}
+
+func TestUIListSecretsWithEnvFilter(t *testing.T) {
+	env := setup(t)
+	env.db.CreateSecret("K1", "v1", "proj", "prod")
+	env.db.CreateSecret("K2", "v2", "proj", "dev")
+
+	h := NewUIHandler(env.db, env.tmpl)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	req := httptest.NewRequest("GET", "/ui/secrets?project=proj&environment=prod", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Body.String(), "K1")
+}
+
+func TestUIUpdatePolicyViaForm(t *testing.T) {
+	env := setup(t)
+	p, _ := env.db.CreatePolicy("test", "org/*", "*", "app", "prod")
+
+	h := NewUIHandler(env.db, env.tmpl)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	form := "name=Updated&repository_pattern=org/*&ref_pattern=refs/heads/main&project=app&environment=staging"
+	req := httptest.NewRequest("POST", "/ui/policies/"+p.ID, strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusSeeOther, rr.Code)
+
+	got, _ := env.db.GetPolicy(p.ID)
+	assert.Equal(t, "Updated", got.Name)
+	assert.Equal(t, "refs/heads/main", got.RefPattern)
+}
+
+func TestUIUpdatePolicyDefaultRefPattern(t *testing.T) {
+	env := setup(t)
+	p, _ := env.db.CreatePolicy("test", "org/*", "refs/heads/main", "app", "prod")
+
+	h := NewUIHandler(env.db, env.tmpl)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	// Update with empty ref_pattern — should default to "*"
+	form := "name=Updated&repository_pattern=org/*&project=app&environment=prod"
+	req := httptest.NewRequest("POST", "/ui/policies/"+p.ID, strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusSeeOther, rr.Code)
+
+	got, _ := env.db.GetPolicy(p.ID)
+	assert.Equal(t, "*", got.RefPattern)
+}

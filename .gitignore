@@ -1,0 +1,4 @@
+server
+secret-server
+*.db
+*.exe
