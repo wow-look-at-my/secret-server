@@ -1,5 +1,6 @@
 services:
   secret-server:
+    container_name: secret-server
     build:
       context: .
       dockerfile_inline: |
@@ -12,8 +13,6 @@ services:
         FROM gcr.io/distroless/static-debian12
         COPY --from=builder /secret-server /secret-server
         ENTRYPOINT ["/secret-server"]
-    ports:
-      - "8080:8080"
     volumes:
       - data:/data
     environment:
@@ -21,9 +20,15 @@ services:
       - DATABASE_PATH=/data/secrets.db
       - ENCRYPTION_KEY=${ENCRYPTION_KEY}
       - CF_ACCESS_TEAM_DOMAIN=${CF_ACCESS_TEAM_DOMAIN}
-      - CF_ACCESS_AUDIENCE=${CF_ACCESS_AUDIENCE}
+      - CF_ACCESS_ADMIN_AUDIENCE=${CF_ACCESS_ADMIN_AUDIENCE}
       - OIDC_AUDIENCE=${OIDC_AUDIENCE}
       - LOG_LEVEL=info
+    networks:
+      - nas-public-network
 
 volumes:
   data:
+
+networks:
+  nas-public-network:
+    external: true

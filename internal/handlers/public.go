@@ -20,7 +20,7 @@ func NewPublicHandler(db *database.DB, oidc *auth.GitHubOIDCValidator) *PublicHa
 }
 
 func (h *PublicHandler) Register(mux *http.ServeMux) {
-	mux.HandleFunc("POST /public/v1/secrets", h.fetchSecrets)
+	mux.HandleFunc("POST "+GitHubPrefix+"/secrets", h.fetchSecrets)
 }
 
 func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {

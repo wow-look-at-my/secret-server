@@ -49,13 +49,13 @@ func main() {
 }
 
 func buildMux(db *database.DB, cfg *config.Config) (*http.ServeMux, error) {
-	tmpl, err := templates.New()
+	tmpl, err := templates.New(handlers.AdminPrefix)
 	if err != nil {
 		return nil, err
 	}
 
 	oidcValidator := auth.NewGitHubOIDCValidator(cfg.OIDCAudience)
-	cfValidator := auth.NewCloudflareAccessValidator(cfg.CFAccessTeamDomain, cfg.CFAccessAudience)
+	cfValidator := auth.NewCloudflareAccessValidator(cfg.CFAccessTeamDomain, cfg.CFAccessAdminAudience)
 
 	mux := http.NewServeMux()
 
@@ -76,24 +76,25 @@ func buildMux(db *database.DB, cfg *config.Config) (*http.ServeMux, error) {
 		adminHandler.Register(adminMux)
 		adminMux.ServeHTTP(w, r)
 	}))
-	mux.HandleFunc("POST /admin/v1/secrets", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
-	mux.HandleFunc("PUT /admin/v1/secrets/{id}", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
-	mux.HandleFunc("DELETE /admin/v1/secrets/{id}", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
-	mux.HandleFunc("POST /admin/v1/policies", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
-	mux.HandleFunc("PUT /admin/v1/policies/{id}", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
-	mux.HandleFunc("DELETE /admin/v1/policies/{id}", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
+	ap := handlers.AdminPrefix + "/v1"
+	mux.HandleFunc("POST "+ap+"/secrets", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
+	mux.HandleFunc("PUT "+ap+"/secrets/{id}", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
+	mux.HandleFunc("DELETE "+ap+"/secrets/{id}", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
+	mux.HandleFunc("POST "+ap+"/policies", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
+	mux.HandleFunc("PUT "+ap+"/policies/{id}", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
+	mux.HandleFunc("DELETE "+ap+"/policies/{id}", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
 
 	// UI — behind CF Access
 	uiMux := http.NewServeMux()
 	uiHandler := handlers.NewUIHandler(db, tmpl)
 	uiHandler.Register(uiMux)
 	cfUI := cfValidator.RequireCFAccess(uiMux)
-	mux.HandleFunc("GET /ui/", func(w http.ResponseWriter, r *http.Request) { cfUI.ServeHTTP(w, r) })
-	mux.HandleFunc("POST /ui/", func(w http.ResponseWriter, r *http.Request) { cfUI.ServeHTTP(w, r) })
+	mux.HandleFunc("GET "+handlers.AdminPrefix+"/", func(w http.ResponseWriter, r *http.Request) { cfUI.ServeHTTP(w, r) })
+	mux.HandleFunc("POST "+handlers.AdminPrefix+"/", func(w http.ResponseWriter, r *http.Request) { cfUI.ServeHTTP(w, r) })
 
-	// Redirect root to UI
+	// Redirect root to admin UI
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/ui/", http.StatusFound)
+		http.Redirect(w, r, handlers.AdminPrefix+"/", http.StatusFound)
 	})
 
 	return mux, nil
