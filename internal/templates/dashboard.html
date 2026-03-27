@@ -1,0 +1,41 @@
+{{template "head" .}}
+{{define "title"}}Dashboard - Secret Server{{end}}
+
+<h1>Dashboard</h1>
+
+<div class="stat-grid">
+    <div class="stat-card">
+        <div class="label">Total Secrets</div>
+        <div class="value">{{.TotalSecrets}}</div>
+    </div>
+    <div class="stat-card">
+        <div class="label">Access Policies</div>
+        <div class="value">{{.TotalPolicies}}</div>
+    </div>
+</div>
+
+{{if .Projects}}
+<h2 style="margin-bottom: 0.5rem;">Secrets by Project</h2>
+<table>
+    <thead>
+        <tr>
+            <th>Project</th>
+            <th>Environment</th>
+            <th>Secrets</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{range .Projects}}
+        <tr>
+            <td>{{.Project}}</td>
+            <td>{{.Environment}}</td>
+            <td>{{.SecretCount}}</td>
+        </tr>
+        {{end}}
+    </tbody>
+</table>
+{{else}}
+<p class="empty">No secrets yet. <a href="/ui/secrets/new">Create one</a>.</p>
+{{end}}
+
+{{template "foot" .}}

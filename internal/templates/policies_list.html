@@ -1,0 +1,43 @@
+{{template "head" .}}
+{{define "title"}}Access Policies - Secret Server{{end}}
+
+<div class="toolbar">
+    <h1>Access Policies</h1>
+    <a href="/ui/policies/new" class="btn btn-primary">New Policy</a>
+</div>
+
+{{if .}}
+<table>
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Repository Pattern</th>
+            <th>Ref Pattern</th>
+            <th>Project</th>
+            <th>Environment</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{range .}}
+        <tr>
+            <td>{{.Name}}</td>
+            <td><code>{{.RepositoryPattern}}</code></td>
+            <td><code>{{.RefPattern}}</code></td>
+            <td>{{.Project}}</td>
+            <td>{{.Environment}}</td>
+            <td>
+                <a href="/ui/policies/{{.ID}}/edit" class="btn btn-sm">Edit</a>
+                <form class="inline" method="post" action="/ui/policies/{{.ID}}/delete" onsubmit="return confirm('Delete this policy?')">
+                    <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                </form>
+            </td>
+        </tr>
+        {{end}}
+    </tbody>
+</table>
+{{else}}
+<p class="empty">No policies yet. <a href="/ui/policies/new">Create one</a>.</p>
+{{end}}
+
+{{template "foot" .}}

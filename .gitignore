@@ -1,0 +1,5 @@
+server
+secret-server
+*.db
+*.exe
+/build/

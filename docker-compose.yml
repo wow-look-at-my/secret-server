@@ -1,0 +1,18 @@
+services:
+  secret-server:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - data:/data
+    environment:
+      - LISTEN_ADDR=:8080
+      - DATABASE_PATH=/data/secrets.db
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - CF_ACCESS_TEAM_DOMAIN=${CF_ACCESS_TEAM_DOMAIN}
+      - CF_ACCESS_AUDIENCE=${CF_ACCESS_AUDIENCE}
+      - OIDC_AUDIENCE=${OIDC_AUDIENCE}
+      - LOG_LEVEL=info
+
+volumes:
+  data:
