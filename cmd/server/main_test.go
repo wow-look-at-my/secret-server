@@ -52,7 +52,7 @@ func TestHealthEndpoint(t *testing.T) {
 	mux, err := buildMux(db, cfg)
 	require.Nil(t, err)
 
-	req := httptest.NewRequest("GET", "/github/health", nil)
+	req := httptest.NewRequest("GET", "/health", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 

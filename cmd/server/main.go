@@ -63,8 +63,8 @@ func buildMux(db *database.DB, cfg *config.Config) (*http.ServeMux, error) {
 	publicHandler := handlers.NewPublicHandler(db, oidcValidator)
 	publicHandler.Register(mux)
 
-	// Health check — under /github so CF Access bypass covers it
-	mux.HandleFunc("GET /github/health", func(w http.ResponseWriter, r *http.Request) {
+	// Health check — accessed directly, not through CF Access
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	})

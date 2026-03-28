@@ -7,11 +7,10 @@ Self-hosted secrets manager for homelab use. Single Go binary with SQLite storag
 | Zone | Routes | Auth | Access |
 |------|--------|------|--------|
 | GitHub API | `POST /github/v1/secrets` | GitHub Actions OIDC JWT | Read-only — vend secrets matching policies |
-| Health | `GET /github/health` | None | Health check endpoint |
 | Admin API | `/admin/v1/*` | Cloudflare Access JWT | Create, update, delete secrets and policies |
 | Admin UI | `/admin/*` | Cloudflare Access JWT | Web UI for managing secrets and policies |
 
-Only two path prefixes matter for Cloudflare Access: protect `/admin/*`, bypass `/github/*`. The GitHub API validates OIDC tokens directly. Admin routes are protected by Cloudflare Access (the server validates CF JWTs as defense-in-depth). The root path `/` redirects to the admin UI.
+Two path prefixes for Cloudflare Access: protect `/admin/*`, bypass `/github/*`. The GitHub API validates OIDC tokens directly. Admin routes are protected by Cloudflare Access (the server validates CF JWTs as defense-in-depth). The root path `/` redirects to the admin UI. `GET /health` is available for Docker/uptime checks (not routed through CF Access).
 
 ## Configuration
 
