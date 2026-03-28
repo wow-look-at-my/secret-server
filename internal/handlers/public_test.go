@@ -13,7 +13,7 @@ import (
 
 func TestPublicFetchSecretsNoToken(t *testing.T) {
 	env := setup(t)
-	h := NewPublicHandler(env.db, env.oidc)
+	h := NewPublicHandler(env.db, env.audit, env.oidc)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -30,7 +30,7 @@ func TestPublicFetchSecretsWithPolicy(t *testing.T) {
 	env.db.CreateSecret("DB_URL", "postgres://localhost", "myapp", "prod")
 	env.db.CreatePolicy("allow", "myorg/*", "*", "myapp", "prod")
 
-	h := NewPublicHandler(env.db, env.oidc)
+	h := NewPublicHandler(env.db, env.audit, env.oidc)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -46,6 +46,14 @@ func TestPublicFetchSecretsWithPolicy(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &result))
 
 	assert.Equal(t, "postgres://localhost", result["DB_URL"])
+
+	// Verify audit entry for secret access
+	entries, err := env.audit.ListEntries(10, 0)
+	require.Nil(t, err)
+	require.Equal(t, 1, len(entries))
+	assert.Equal(t, "secret.access", entries[0].Action)
+	assert.Equal(t, "github_actions", entries[0].ActorType)
+	assert.Equal(t, "myorg/repo", entries[0].ActorID)
 }
 
 func TestPublicFetchSecretsNoMatchingPolicy(t *testing.T) {
@@ -53,7 +61,7 @@ func TestPublicFetchSecretsNoMatchingPolicy(t *testing.T) {
 	env.db.CreateSecret("KEY", "val", "app", "prod")
 	env.db.CreatePolicy("other", "otherorg/*", "*", "app", "prod")
 
-	h := NewPublicHandler(env.db, env.oidc)
+	h := NewPublicHandler(env.db, env.audit, env.oidc)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -70,7 +78,7 @@ func TestPublicFetchSecretsNoMatchingPolicy(t *testing.T) {
 
 func TestPublicFetchSecretsInvalidToken(t *testing.T) {
 	env := setup(t)
-	h := NewPublicHandler(env.db, env.oidc)
+	h := NewPublicHandler(env.db, env.audit, env.oidc)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -91,7 +99,7 @@ func TestPublicFetchSecretsMultiplePoliciesSameProjectEnv(t *testing.T) {
 	env.db.CreatePolicy("p1", "myorg/*", "*", "app", "prod")
 	env.db.CreatePolicy("p2", "myorg/*", "refs/heads/*", "app", "prod")
 
-	h := NewPublicHandler(env.db, env.oidc)
+	h := NewPublicHandler(env.db, env.audit, env.oidc)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -117,7 +125,7 @@ func TestPublicFetchSecretsMultipleProjectEnvs(t *testing.T) {
 	env.db.CreatePolicy("p1", "myorg/*", "*", "app", "prod")
 	env.db.CreatePolicy("p2", "myorg/*", "*", "app", "staging")
 
-	h := NewPublicHandler(env.db, env.oidc)
+	h := NewPublicHandler(env.db, env.audit, env.oidc)
 	mux := http.NewServeMux()
 	h.Register(mux)
 

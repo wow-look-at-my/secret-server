@@ -2,17 +2,21 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 
+	"github.com/wow-look-at-my/secret-server/internal/auth"
 	"github.com/wow-look-at-my/secret-server/internal/database"
 )
 
 type AdminHandler struct {
-	db *database.DB
+	db    *database.DB
+	audit *database.AuditDB
 }
 
-func NewAdminHandler(db *database.DB) *AdminHandler {
-	return &AdminHandler{db: db}
+func NewAdminHandler(db *database.DB, audit *database.AuditDB) *AdminHandler {
+	return &AdminHandler{db: db, audit: audit}
 }
 
 func (h *AdminHandler) Register(mux *http.ServeMux) {
@@ -23,6 +27,18 @@ func (h *AdminHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST "+p+"/policies", h.createPolicy)
 	mux.HandleFunc("PUT "+p+"/policies/{id}", h.updatePolicy)
 	mux.HandleFunc("DELETE "+p+"/policies/{id}", h.deletePolicy)
+}
+
+func adminActor(r *http.Request) string {
+	if id := auth.CFIdentityFromContext(r.Context()); id != nil {
+		if id.Email != "" {
+			return id.Email
+		}
+		if id.Subject != "" {
+			return id.Subject
+		}
+	}
+	return "unknown"
 }
 
 func (h *AdminHandler) createSecret(w http.ResponseWriter, r *http.Request) {
@@ -47,6 +63,11 @@ func (h *AdminHandler) createSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	details, _ := json.Marshal(map[string]string{"key": req.Key, "project": req.Project, "environment": req.Environment})
+	if err := h.audit.CreateEntry("secret.create", "admin", adminActor(r), "secret", secret.ID, string(details)); err != nil {
+		slog.Error("audit log failed", "error", err)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{"id": secret.ID})
@@ -65,19 +86,51 @@ func (h *AdminHandler) updateSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.Value == "" {
+		existing, err := h.db.GetSecret(id)
+		if err != nil {
+			http.Error(w, `{"error":"failed to get secret"}`, http.StatusInternalServerError)
+			return
+		}
+		if existing == nil {
+			http.Error(w, `{"error":"secret not found"}`, http.StatusNotFound)
+			return
+		}
+		req.Value = existing.Value
+	}
+
 	if err := h.db.UpdateSecret(id, req.Key, req.Value, req.Project, req.Environment); err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			http.Error(w, `{"error":"secret not found"}`, http.StatusNotFound)
+			return
+		}
 		http.Error(w, `{"error":"failed to update secret"}`, http.StatusInternalServerError)
 		return
 	}
+
+	details, _ := json.Marshal(map[string]string{"key": req.Key, "project": req.Project, "environment": req.Environment})
+	if err := h.audit.CreateEntry("secret.update", "admin", adminActor(r), "secret", id, string(details)); err != nil {
+		slog.Error("audit log failed", "error", err)
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *AdminHandler) deleteSecret(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := h.db.DeleteSecret(id); err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			http.Error(w, `{"error":"secret not found"}`, http.StatusNotFound)
+			return
+		}
 		http.Error(w, `{"error":"failed to delete secret"}`, http.StatusInternalServerError)
 		return
 	}
+
+	if err := h.audit.CreateEntry("secret.delete", "admin", adminActor(r), "secret", id, "{}"); err != nil {
+		slog.Error("audit log failed", "error", err)
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -107,6 +160,11 @@ func (h *AdminHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	details, _ := json.Marshal(map[string]string{"name": req.Name, "repository_pattern": req.RepositoryPattern, "project": req.Project, "environment": req.Environment})
+	if err := h.audit.CreateEntry("policy.create", "admin", adminActor(r), "policy", policy.ID, string(details)); err != nil {
+		slog.Error("audit log failed", "error", err)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{"id": policy.ID})
@@ -127,17 +185,36 @@ func (h *AdminHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.db.UpdatePolicy(id, req.Name, req.RepositoryPattern, req.RefPattern, req.Project, req.Environment); err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			http.Error(w, `{"error":"policy not found"}`, http.StatusNotFound)
+			return
+		}
 		http.Error(w, `{"error":"failed to update policy"}`, http.StatusInternalServerError)
 		return
 	}
+
+	details, _ := json.Marshal(map[string]string{"name": req.Name, "repository_pattern": req.RepositoryPattern, "project": req.Project, "environment": req.Environment})
+	if err := h.audit.CreateEntry("policy.update", "admin", adminActor(r), "policy", id, string(details)); err != nil {
+		slog.Error("audit log failed", "error", err)
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *AdminHandler) deletePolicy(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := h.db.DeletePolicy(id); err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			http.Error(w, `{"error":"policy not found"}`, http.StatusNotFound)
+			return
+		}
 		http.Error(w, `{"error":"failed to delete policy"}`, http.StatusInternalServerError)
 		return
 	}
+
+	if err := h.audit.CreateEntry("policy.delete", "admin", adminActor(r), "policy", id, "{}"); err != nil {
+		slog.Error("audit log failed", "error", err)
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 }

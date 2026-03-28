@@ -24,6 +24,7 @@ All configuration is via environment variables:
 | `OIDC_AUDIENCE` | No | — | Expected audience for GitHub OIDC tokens |
 | `LISTEN_ADDR` | No | `:8080` | Server listen address |
 | `DATABASE_PATH` | No | `./secrets.db` | Path to SQLite database file |
+| `AUDIT_DATABASE_PATH` | No | `./audit.db` | Path to audit log SQLite database (separate from secrets DB) |
 | `LOG_LEVEL` | No | `info` | Log level: `debug`, `info`, `warn`, `error` |
 
 Generate an encryption key:
@@ -73,6 +74,16 @@ jobs:
 ```
 
 The action requests a GitHub OIDC token, sends it to the server's public API, and exports returned secrets as environment variables.
+
+## Audit Log
+
+All state-changing operations are recorded in a separate SQLite database (`audit.db` by default). This includes:
+
+- **Secret access** — which GitHub Actions repository/ref/workflow fetched secrets, and which policies matched
+- **Secret management** — create, update, delete operations by admin users
+- **Policy management** — create, update, delete operations by admin users
+
+The audit log is isolated from the secrets database to prevent corruption of credential data during hardware or power failures. View the audit log at `/ui/audit`.
 
 ## Access Policies
 

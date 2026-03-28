@@ -106,16 +106,36 @@ func (d *DB) UpdateSecret(id, key, value, project, environment string) error {
 		return fmt.Errorf("encrypt value: %w", err)
 	}
 	encB64 := base64.StdEncoding.EncodeToString(encrypted)
-	_, err = d.db.Exec(
+	result, err := d.db.Exec(
 		"UPDATE secrets SET key = ?, value = ?, project = ?, environment = ?, updated_at = ? WHERE id = ?",
 		key, encB64, project, environment, time.Now().UTC(), id,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (d *DB) DeleteSecret(id string) error {
-	_, err := d.db.Exec("DELETE FROM secrets WHERE id = ?", id)
-	return err
+	result, err := d.db.Exec("DELETE FROM secrets WHERE id = ?", id)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // GetSecretsByProjectEnv returns decrypted secrets for a given project+environment.

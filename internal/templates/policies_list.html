@@ -29,6 +29,7 @@
             <td>
                 <a href="{{prefix}}/policies/{{.ID}}/edit" class="btn btn-sm">Edit</a>
                 <form class="inline" method="post" action="{{prefix}}/policies/{{.ID}}/delete" onsubmit="return confirm('Delete this policy?')">
+                    {{with csrfToken}}<input type="hidden" name="csrf_token" value="{{.}}">{{end}}
                     <button type="submit" class="btn btn-sm btn-danger">Delete</button>
                 </form>
             </td>

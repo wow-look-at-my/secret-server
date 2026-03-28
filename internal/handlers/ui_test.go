@@ -15,7 +15,7 @@ func TestUIPages(t *testing.T) {
 	env.db.CreateSecret("KEY", "val", "app", "prod")
 	env.db.CreatePolicy("p", "org/*", "*", "app", "prod")
 
-	h := NewUIHandler(env.db, env.tmpl)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -42,7 +42,7 @@ func TestUIPages(t *testing.T) {
 
 func TestUISecretCreateEditDelete(t *testing.T) {
 	env := setup(t)
-	h := NewUIHandler(env.db, env.tmpl)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -83,7 +83,7 @@ func TestUISecretCreateEditDelete(t *testing.T) {
 
 func TestUIPolicyCreateEditDelete(t *testing.T) {
 	env := setup(t)
-	h := NewUIHandler(env.db, env.tmpl)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -125,7 +125,7 @@ func TestUIPolicyCreateEditDelete(t *testing.T) {
 
 func TestUIEditSecretNotFound(t *testing.T) {
 	env := setup(t)
-	h := NewUIHandler(env.db, env.tmpl)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -135,9 +135,61 @@ func TestUIEditSecretNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, rr.Code)
 }
 
+func TestUIUpdateNonexistentSecret(t *testing.T) {
+	env := setup(t)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	form := "key=K&value=v&project=app&environment=prod"
+	req := httptest.NewRequest("POST", "/admin/secrets/nonexistent", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+func TestUIDeleteNonexistentSecret(t *testing.T) {
+	env := setup(t)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	req := httptest.NewRequest("POST", "/admin/secrets/nonexistent/delete", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+func TestUIUpdateNonexistentPolicy(t *testing.T) {
+	env := setup(t)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	form := "name=P&repository_pattern=org/*&ref_pattern=*&project=app&environment=prod"
+	req := httptest.NewRequest("POST", "/admin/policies/nonexistent", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+func TestUIDeleteNonexistentPolicy(t *testing.T) {
+	env := setup(t)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	req := httptest.NewRequest("POST", "/admin/policies/nonexistent/delete", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
 func TestUIEditPolicyNotFound(t *testing.T) {
 	env := setup(t)
-	h := NewUIHandler(env.db, env.tmpl)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -149,7 +201,7 @@ func TestUIEditPolicyNotFound(t *testing.T) {
 
 func TestUIPolicyCreateDefaultRefPattern(t *testing.T) {
 	env := setup(t)
-	h := NewUIHandler(env.db, env.tmpl)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -167,7 +219,7 @@ func TestUIPolicyCreateDefaultRefPattern(t *testing.T) {
 
 func TestUIDashboardRedirectBadPath(t *testing.T) {
 	env := setup(t)
-	h := NewUIHandler(env.db, env.tmpl)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -182,7 +234,7 @@ func TestUISecretCreateDuplicate(t *testing.T) {
 	env := setup(t)
 	env.db.CreateSecret("DUP_KEY", "val", "proj", "env")
 
-	h := NewUIHandler(env.db, env.tmpl)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -199,7 +251,7 @@ func TestUIListSecretsWithEnvFilter(t *testing.T) {
 	env.db.CreateSecret("K1", "v1", "proj", "prod")
 	env.db.CreateSecret("K2", "v2", "proj", "dev")
 
-	h := NewUIHandler(env.db, env.tmpl)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -214,7 +266,7 @@ func TestUIUpdatePolicyViaForm(t *testing.T) {
 	env := setup(t)
 	p, _ := env.db.CreatePolicy("test", "org/*", "*", "app", "prod")
 
-	h := NewUIHandler(env.db, env.tmpl)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -234,7 +286,7 @@ func TestUIUpdatePolicyDefaultRefPattern(t *testing.T) {
 	env := setup(t)
 	p, _ := env.db.CreatePolicy("test", "org/*", "refs/heads/main", "app", "prod")
 
-	h := NewUIHandler(env.db, env.tmpl)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -253,7 +305,7 @@ func TestUIDeleteSecretViaForm(t *testing.T) {
 	env := setup(t)
 	s, _ := env.db.CreateSecret("DEL", "val", "app", "prod")
 
-	h := NewUIHandler(env.db, env.tmpl)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -270,7 +322,7 @@ func TestUIDeletePolicyViaForm(t *testing.T) {
 	env := setup(t)
 	p, _ := env.db.CreatePolicy("del", "org/*", "*", "app", "prod")
 
-	h := NewUIHandler(env.db, env.tmpl)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -287,7 +339,7 @@ func TestUIUpdateSecretViaForm(t *testing.T) {
 	env := setup(t)
 	s, _ := env.db.CreateSecret("UPD", "old", "app", "prod")
 
-	h := NewUIHandler(env.db, env.tmpl)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -302,11 +354,30 @@ func TestUIUpdateSecretViaForm(t *testing.T) {
 	assert.Equal(t, "new_val", got.Value)
 }
 
+func TestUIUpdateSecretEmptyValuePreservesExisting(t *testing.T) {
+	env := setup(t)
+	s, _ := env.db.CreateSecret("KEEP", "original_secret", "app", "prod")
+
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	form := "key=KEEP&value=&project=app&environment=prod"
+	req := httptest.NewRequest("POST", "/admin/secrets/"+s.ID, strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusSeeOther, rr.Code)
+
+	got, _ := env.db.GetSecret(s.ID)
+	assert.Equal(t, "original_secret", got.Value)
+}
+
 // DB error tests use a closed database to trigger error paths.
 
 func TestUICreateSecretDBError(t *testing.T) {
 	env := setupClosedDB(t)
-	h := NewUIHandler(env.db, env.tmpl)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -320,7 +391,7 @@ func TestUICreateSecretDBError(t *testing.T) {
 
 func TestUIUpdateSecretDBError(t *testing.T) {
 	env := setupClosedDB(t)
-	h := NewUIHandler(env.db, env.tmpl)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -334,7 +405,7 @@ func TestUIUpdateSecretDBError(t *testing.T) {
 
 func TestUICreatePolicyDBError(t *testing.T) {
 	env := setupClosedDB(t)
-	h := NewUIHandler(env.db, env.tmpl)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -348,7 +419,7 @@ func TestUICreatePolicyDBError(t *testing.T) {
 
 func TestUIUpdatePolicyDBError(t *testing.T) {
 	env := setupClosedDB(t)
-	h := NewUIHandler(env.db, env.tmpl)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -362,7 +433,7 @@ func TestUIUpdatePolicyDBError(t *testing.T) {
 
 func TestUIListSecretsDBError(t *testing.T) {
 	env := setupClosedDB(t)
-	h := NewUIHandler(env.db, env.tmpl)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -374,7 +445,7 @@ func TestUIListSecretsDBError(t *testing.T) {
 
 func TestUIListPoliciesDBError(t *testing.T) {
 	env := setupClosedDB(t)
-	h := NewUIHandler(env.db, env.tmpl)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -386,7 +457,7 @@ func TestUIListPoliciesDBError(t *testing.T) {
 
 func TestUIDashboardDBError(t *testing.T) {
 	env := setupClosedDB(t)
-	h := NewUIHandler(env.db, env.tmpl)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -398,7 +469,7 @@ func TestUIDashboardDBError(t *testing.T) {
 
 func TestUIEditSecretDBError(t *testing.T) {
 	env := setupClosedDB(t)
-	h := NewUIHandler(env.db, env.tmpl)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -410,7 +481,7 @@ func TestUIEditSecretDBError(t *testing.T) {
 
 func TestUIEditPolicyDBError(t *testing.T) {
 	env := setupClosedDB(t)
-	h := NewUIHandler(env.db, env.tmpl)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -422,7 +493,7 @@ func TestUIEditPolicyDBError(t *testing.T) {
 
 func TestUIDeleteSecretDBError(t *testing.T) {
 	env := setupClosedDB(t)
-	h := NewUIHandler(env.db, env.tmpl)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -434,11 +505,52 @@ func TestUIDeleteSecretDBError(t *testing.T) {
 
 func TestUIDeletePolicyDBError(t *testing.T) {
 	env := setupClosedDB(t)
-	h := NewUIHandler(env.db, env.tmpl)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
 	req := httptest.NewRequest("POST", "/admin/policies/some-id/delete", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+}
+
+func TestUIAuditLogPage(t *testing.T) {
+	env := setup(t)
+	env.audit.CreateEntry("secret.create", "admin", "user@test.com", "secret", "abc123", `{"key":"API_KEY"}`)
+
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	req := httptest.NewRequest("GET", "/admin/audit", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Body.String(), "secret.create")
+	assert.Contains(t, rr.Body.String(), "user@test.com")
+}
+
+func TestUIAuditLogPageEmpty(t *testing.T) {
+	env := setup(t)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	req := httptest.NewRequest("GET", "/admin/audit", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Body.String(), "No audit log entries yet.")
+}
+
+func TestUIAuditLogDBError(t *testing.T) {
+	env := setupClosedDB(t)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	req := httptest.NewRequest("GET", "/admin/audit", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)

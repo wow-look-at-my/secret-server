@@ -25,6 +25,7 @@ func validEnv(t *testing.T) {
 		"ENCRYPTION_KEY":		hex.EncodeToString(key),
 		"CF_ACCESS_TEAM_DOMAIN":	"myteam",
 		"CF_ACCESS_ADMIN_AUDIENCE":		"aud123",
+		"OIDC_AUDIENCE":		"https://secrets.example.com",
 	})
 }
 
@@ -42,6 +43,8 @@ func TestLoadValid(t *testing.T) {
 	assert.Equal(t, "myteam", cfg.CFAccessTeamDomain)
 
 	assert.Equal(t, "aud123", cfg.CFAccessAdminAudience)
+
+	assert.Equal(t, "https://secrets.example.com", cfg.OIDCAudience)
 
 }
 
@@ -121,6 +124,15 @@ func TestLoadMissingCFAudience(t *testing.T) {
 		"CF_ACCESS_ADMIN_AUDIENCE":		"",
 	})
 	os.Unsetenv("CF_ACCESS_ADMIN_AUDIENCE")
+	_, err := Load()
+	require.NotNil(t, err)
+
+}
+
+func TestLoadMissingOIDCAudience(t *testing.T) {
+	validEnv(t)
+	t.Setenv("OIDC_AUDIENCE", "")
+	os.Unsetenv("OIDC_AUDIENCE")
 	_, err := Load()
 	require.NotNil(t, err)
 
