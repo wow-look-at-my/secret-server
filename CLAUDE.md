@@ -21,6 +21,10 @@ Two path prefixes for Cloudflare Access:
 Route constants are in `internal/handlers/routes.go`. Templates use `{{prefix}}` to
 reference the admin UI prefix.
 
+- **Encryption at rest**: Secrets are AES-256-GCM encrypted in SQLite, base64-encoded. Decrypted only in memory on retrieval.
+- **Policy-based access**: Glob patterns on repository name + git ref determine which secrets a workflow can access.
+- **Pure-Go SQLite**: Uses `modernc.org/sqlite` (no CGO required). CGO is disabled in the build.
+
 ## Key packages
 
 - `cmd/server` — entrypoint, route wiring
@@ -30,3 +34,11 @@ reference the admin UI prefix.
 - `internal/database` — SQLite via modernc.org/sqlite
 - `internal/handlers` — HTTP handlers (admin API, public API, UI)
 - `internal/templates` — embedded HTML templates
+
+## Configuration
+
+All via environment variables. Required: `ENCRYPTION_KEY`, `CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_ADMIN_AUDIENCE`. See README.md for full table.
+
+## CI
+
+Downloads `go-toolchain` binary in CI and runs it. Triggered on every push. No PRs merge without passing CI.
