@@ -13,7 +13,7 @@ import (
 
 func TestAdminCreateAndDeleteSecret(t *testing.T) {
 	env := setup(t)
-	h := NewAdminHandler(env.db)
+	h := NewAdminHandler(env.db, env.audit)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -28,15 +28,30 @@ func TestAdminCreateAndDeleteSecret(t *testing.T) {
 	json.Unmarshal(rr.Body.Bytes(), &created)
 	id := created["id"]
 
+	// Verify audit entry for create
+	entries, err := env.audit.ListEntries(10, 0)
+	require.Nil(t, err)
+	require.Equal(t, 1, len(entries))
+	assert.Equal(t, "secret.create", entries[0].Action)
+	assert.Equal(t, "secret", entries[0].ResourceType)
+	assert.Equal(t, id, entries[0].ResourceID)
+
 	req = httptest.NewRequest("DELETE", "/admin/v1/secrets/"+id, nil)
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusNoContent, rr.Code)
+
+	// Verify audit entry for delete
+	entries, err = env.audit.ListEntries(10, 0)
+	require.Nil(t, err)
+	require.Equal(t, 2, len(entries))
+	assert.Equal(t, "secret.delete", entries[0].Action)
+	assert.Equal(t, id, entries[0].ResourceID)
 }
 
 func TestAdminCreateSecretMissingFields(t *testing.T) {
 	env := setup(t)
-	h := NewAdminHandler(env.db)
+	h := NewAdminHandler(env.db, env.audit)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -52,7 +67,7 @@ func TestAdminUpdateSecret(t *testing.T) {
 	env := setup(t)
 	s, _ := env.db.CreateSecret("KEY", "old", "app", "prod")
 
-	h := NewAdminHandler(env.db)
+	h := NewAdminHandler(env.db, env.audit)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -65,13 +80,20 @@ func TestAdminUpdateSecret(t *testing.T) {
 
 	got, _ := env.db.GetSecret(s.ID)
 	assert.Equal(t, "new", got.Value)
+
+	// Verify audit entry for update
+	entries, err := env.audit.ListEntries(10, 0)
+	require.Nil(t, err)
+	require.Equal(t, 1, len(entries))
+	assert.Equal(t, "secret.update", entries[0].Action)
+	assert.Equal(t, s.ID, entries[0].ResourceID)
 }
 
 func TestAdminUpdateSecretEmptyValuePreservesExisting(t *testing.T) {
 	env := setup(t)
 	s, _ := env.db.CreateSecret("KEY", "original", "app", "prod")
 
-	h := NewAdminHandler(env.db)
+	h := NewAdminHandler(env.db, env.audit)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -88,7 +110,7 @@ func TestAdminUpdateSecretEmptyValuePreservesExisting(t *testing.T) {
 
 func TestAdminPolicyCRUD(t *testing.T) {
 	env := setup(t)
-	h := NewAdminHandler(env.db)
+	h := NewAdminHandler(env.db, env.audit)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -102,21 +124,37 @@ func TestAdminPolicyCRUD(t *testing.T) {
 	json.Unmarshal(rr.Body.Bytes(), &created)
 	id := created["id"]
 
+	// Verify audit entry for policy create
+	entries, _ := env.audit.ListEntries(10, 0)
+	require.Equal(t, 1, len(entries))
+	assert.Equal(t, "policy.create", entries[0].Action)
+	assert.Equal(t, id, entries[0].ResourceID)
+
 	body = `{"name":"updated","repository_pattern":"org/*","ref_pattern":"*","project":"app","environment":"staging"}`
 	req = httptest.NewRequest("PUT", "/admin/v1/policies/"+id, strings.NewReader(body))
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusNoContent, rr.Code)
 
+	// Verify audit entry for policy update
+	entries, _ = env.audit.ListEntries(10, 0)
+	require.Equal(t, 2, len(entries))
+	assert.Equal(t, "policy.update", entries[0].Action)
+
 	req = httptest.NewRequest("DELETE", "/admin/v1/policies/"+id, nil)
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusNoContent, rr.Code)
+
+	// Verify audit entry for policy delete
+	entries, _ = env.audit.ListEntries(10, 0)
+	require.Equal(t, 3, len(entries))
+	assert.Equal(t, "policy.delete", entries[0].Action)
 }
 
 func TestAdminCreatePolicyMissingFields(t *testing.T) {
 	env := setup(t)
-	h := NewAdminHandler(env.db)
+	h := NewAdminHandler(env.db, env.audit)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -129,7 +167,7 @@ func TestAdminCreatePolicyMissingFields(t *testing.T) {
 
 func TestAdminCreatePolicyDefaultRefPattern(t *testing.T) {
 	env := setup(t)
-	h := NewAdminHandler(env.db)
+	h := NewAdminHandler(env.db, env.audit)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -145,7 +183,7 @@ func TestAdminCreatePolicyDefaultRefPattern(t *testing.T) {
 
 func TestAdminUpdateNonexistentSecret(t *testing.T) {
 	env := setup(t)
-	h := NewAdminHandler(env.db)
+	h := NewAdminHandler(env.db, env.audit)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -158,7 +196,7 @@ func TestAdminUpdateNonexistentSecret(t *testing.T) {
 
 func TestAdminDeleteNonexistentSecret(t *testing.T) {
 	env := setup(t)
-	h := NewAdminHandler(env.db)
+	h := NewAdminHandler(env.db, env.audit)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -170,7 +208,7 @@ func TestAdminDeleteNonexistentSecret(t *testing.T) {
 
 func TestAdminUpdateNonexistentPolicy(t *testing.T) {
 	env := setup(t)
-	h := NewAdminHandler(env.db)
+	h := NewAdminHandler(env.db, env.audit)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -183,7 +221,7 @@ func TestAdminUpdateNonexistentPolicy(t *testing.T) {
 
 func TestAdminDeleteNonexistentPolicy(t *testing.T) {
 	env := setup(t)
-	h := NewAdminHandler(env.db)
+	h := NewAdminHandler(env.db, env.audit)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -195,7 +233,7 @@ func TestAdminDeleteNonexistentPolicy(t *testing.T) {
 
 func TestAdminInvalidJSON(t *testing.T) {
 	env := setup(t)
-	h := NewAdminHandler(env.db)
+	h := NewAdminHandler(env.db, env.audit)
 	mux := http.NewServeMux()
 	h.Register(mux)
 

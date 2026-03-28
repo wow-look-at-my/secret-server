@@ -14,7 +14,7 @@ import (
 	"github.com/wow-look-at-my/testify/require"
 )
 
-func testDB(t *testing.T) *database.DB {
+func testDB(t *testing.T) (*database.DB, *database.AuditDB) {
 	t.Helper()
 	key := make([]byte, 32)
 	for i := range key {
@@ -27,29 +27,36 @@ func testDB(t *testing.T) *database.DB {
 	f.Close()
 	db, err := database.New(f.Name(), enc)
 	require.Nil(t, err)
-	t.Cleanup(func() { db.Close() })
-	return db
+
+	af, err := os.CreateTemp(t.TempDir(), "test-audit-*.db")
+	require.Nil(t, err)
+	af.Close()
+	auditDB, err := database.NewAuditDB(af.Name())
+	require.Nil(t, err)
+
+	t.Cleanup(func() { db.Close(); auditDB.Close() })
+	return db, auditDB
 }
 
 func TestBuildMux(t *testing.T) {
-	db := testDB(t)
+	db, auditDB := testDB(t)
 	cfg := &config.Config{
 		ListenAddr:         ":0",
 		CFAccessTeamDomain: "team",
 		CFAccessAdminAudience:   "aud",
 	}
-	mux, err := buildMux(db, cfg)
+	mux, err := buildMux(db, auditDB, cfg)
 	require.Nil(t, err)
 	require.NotNil(t, mux)
 }
 
 func TestHealthEndpoint(t *testing.T) {
-	db := testDB(t)
+	db, auditDB := testDB(t)
 	cfg := &config.Config{
 		CFAccessTeamDomain: "team",
 		CFAccessAdminAudience:   "aud",
 	}
-	mux, err := buildMux(db, cfg)
+	mux, err := buildMux(db, auditDB, cfg)
 	require.Nil(t, err)
 
 	req := httptest.NewRequest("GET", "/health", nil)
@@ -61,12 +68,12 @@ func TestHealthEndpoint(t *testing.T) {
 }
 
 func TestRootRedirect(t *testing.T) {
-	db := testDB(t)
+	db, auditDB := testDB(t)
 	cfg := &config.Config{
 		CFAccessTeamDomain: "team",
 		CFAccessAdminAudience:   "aud",
 	}
-	mux, err := buildMux(db, cfg)
+	mux, err := buildMux(db, auditDB, cfg)
 	require.Nil(t, err)
 
 	req := httptest.NewRequest("GET", "/", nil)
@@ -78,12 +85,12 @@ func TestRootRedirect(t *testing.T) {
 }
 
 func TestRootNotFoundForOtherPaths(t *testing.T) {
-	db := testDB(t)
+	db, auditDB := testDB(t)
 	cfg := &config.Config{
 		CFAccessTeamDomain: "team",
 		CFAccessAdminAudience:   "aud",
 	}
-	mux, err := buildMux(db, cfg)
+	mux, err := buildMux(db, auditDB, cfg)
 	require.Nil(t, err)
 
 	req := httptest.NewRequest("GET", "/nonexistent", nil)
@@ -94,12 +101,12 @@ func TestRootNotFoundForOtherPaths(t *testing.T) {
 }
 
 func TestAdminRequiresCFAccess(t *testing.T) {
-	db := testDB(t)
+	db, auditDB := testDB(t)
 	cfg := &config.Config{
 		CFAccessTeamDomain: "team",
 		CFAccessAdminAudience:   "aud",
 	}
-	mux, err := buildMux(db, cfg)
+	mux, err := buildMux(db, auditDB, cfg)
 	require.Nil(t, err)
 
 	// Admin endpoint without CF Access token should be unauthorized
@@ -111,12 +118,12 @@ func TestAdminRequiresCFAccess(t *testing.T) {
 }
 
 func TestUIRequiresCFAccess(t *testing.T) {
-	db := testDB(t)
+	db, auditDB := testDB(t)
 	cfg := &config.Config{
 		CFAccessTeamDomain: "team",
 		CFAccessAdminAudience:   "aud",
 	}
-	mux, err := buildMux(db, cfg)
+	mux, err := buildMux(db, auditDB, cfg)
 	require.Nil(t, err)
 
 	req := httptest.NewRequest("GET", handlers.AdminPrefix+"/", nil)
@@ -127,12 +134,12 @@ func TestUIRequiresCFAccess(t *testing.T) {
 }
 
 func TestPublicAPINoAuth(t *testing.T) {
-	db := testDB(t)
+	db, auditDB := testDB(t)
 	cfg := &config.Config{
 		CFAccessTeamDomain: "team",
 		CFAccessAdminAudience:   "aud",
 	}
-	mux, err := buildMux(db, cfg)
+	mux, err := buildMux(db, auditDB, cfg)
 	require.Nil(t, err)
 
 	// Public endpoint returns 401 for missing Bearer, not CF Access 401
