@@ -8,7 +8,7 @@ import (
 )
 
 func TestNewTemplates(t *testing.T) {
-	tmpl, err := New()
+	tmpl, err := New("/admin")
 	require.Nil(t, err)
 
 	require.NotNil(t, tmpl)
@@ -16,7 +16,7 @@ func TestNewTemplates(t *testing.T) {
 }
 
 func TestRenderDashboard(t *testing.T) {
-	tmpl, err := New()
+	tmpl, err := New("/admin")
 	require.Nil(t, err)
 
 	rr := httptest.NewRecorder()
@@ -42,7 +42,7 @@ func TestRenderDashboard(t *testing.T) {
 }
 
 func TestRenderSecretsList(t *testing.T) {
-	tmpl, _ := New()
+	tmpl, _ := New("/admin")
 	rr := httptest.NewRecorder()
 	tmpl.Render(rr, "secrets_list.html", map[string]any{
 		"Secrets":	[]any{},
@@ -54,7 +54,7 @@ func TestRenderSecretsList(t *testing.T) {
 }
 
 func TestRenderSecretForm(t *testing.T) {
-	tmpl, _ := New()
+	tmpl, _ := New("/admin")
 	rr := httptest.NewRecorder()
 	tmpl.Render(rr, "secret_form.html", map[string]any{
 		"IsNew": true,
@@ -64,7 +64,7 @@ func TestRenderSecretForm(t *testing.T) {
 }
 
 func TestRenderPoliciesList(t *testing.T) {
-	tmpl, _ := New()
+	tmpl, _ := New("/admin")
 	rr := httptest.NewRecorder()
 	tmpl.Render(rr, "policies_list.html", []any{})
 	assert.Equal(t, 200, rr.Code)
@@ -72,7 +72,7 @@ func TestRenderPoliciesList(t *testing.T) {
 }
 
 func TestRenderPolicyForm(t *testing.T) {
-	tmpl, _ := New()
+	tmpl, _ := New("/admin")
 	rr := httptest.NewRecorder()
 	tmpl.Render(rr, "policy_form.html", map[string]any{
 		"IsNew": true,

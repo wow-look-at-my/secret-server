@@ -24,12 +24,12 @@ func TestUIPages(t *testing.T) {
 		path   string
 		status int
 	}{
-		{"GET", "/ui/", http.StatusOK},
-		{"GET", "/ui/secrets", http.StatusOK},
-		{"GET", "/ui/secrets?project=app", http.StatusOK},
-		{"GET", "/ui/secrets/new", http.StatusOK},
-		{"GET", "/ui/policies", http.StatusOK},
-		{"GET", "/ui/policies/new", http.StatusOK},
+		{"GET", "/admin/", http.StatusOK},
+		{"GET", "/admin/secrets", http.StatusOK},
+		{"GET", "/admin/secrets?project=app", http.StatusOK},
+		{"GET", "/admin/secrets/new", http.StatusOK},
+		{"GET", "/admin/policies", http.StatusOK},
+		{"GET", "/admin/policies/new", http.StatusOK},
 	}
 
 	for _, p := range pages {
@@ -47,7 +47,7 @@ func TestUISecretCreateEditDelete(t *testing.T) {
 	h.Register(mux)
 
 	form := "key=MY_KEY&value=my_secret&project=testproj&environment=staging"
-	req := httptest.NewRequest("POST", "/ui/secrets", strings.NewReader(form))
+	req := httptest.NewRequest("POST", "/admin/secrets", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -57,13 +57,13 @@ func TestUISecretCreateEditDelete(t *testing.T) {
 	require.Equal(t, 1, len(secrets))
 	id := secrets[0].ID
 
-	req = httptest.NewRequest("GET", "/ui/secrets/"+id+"/edit", nil)
+	req = httptest.NewRequest("GET", "/admin/secrets/"+id+"/edit", nil)
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusOK, rr.Code)
 
 	form = "key=MY_KEY&value=updated_secret&project=testproj&environment=staging"
-	req = httptest.NewRequest("POST", "/ui/secrets/"+id, strings.NewReader(form))
+	req = httptest.NewRequest("POST", "/admin/secrets/"+id, strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -72,7 +72,7 @@ func TestUISecretCreateEditDelete(t *testing.T) {
 	got, _ := env.db.GetSecret(id)
 	assert.Equal(t, "updated_secret", got.Value)
 
-	req = httptest.NewRequest("POST", "/ui/secrets/"+id+"/delete", nil)
+	req = httptest.NewRequest("POST", "/admin/secrets/"+id+"/delete", nil)
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusSeeOther, rr.Code)
@@ -88,7 +88,7 @@ func TestUIPolicyCreateEditDelete(t *testing.T) {
 	h.Register(mux)
 
 	form := "name=Test+Policy&repository_pattern=org/*&ref_pattern=*&project=app&environment=prod"
-	req := httptest.NewRequest("POST", "/ui/policies", strings.NewReader(form))
+	req := httptest.NewRequest("POST", "/admin/policies", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -98,13 +98,13 @@ func TestUIPolicyCreateEditDelete(t *testing.T) {
 	require.Equal(t, 1, len(policies))
 	id := policies[0].ID
 
-	req = httptest.NewRequest("GET", "/ui/policies/"+id+"/edit", nil)
+	req = httptest.NewRequest("GET", "/admin/policies/"+id+"/edit", nil)
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusOK, rr.Code)
 
 	form = "name=Updated+Policy&repository_pattern=org/*&ref_pattern=refs/heads/main&project=app&environment=staging"
-	req = httptest.NewRequest("POST", "/ui/policies/"+id, strings.NewReader(form))
+	req = httptest.NewRequest("POST", "/admin/policies/"+id, strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -114,7 +114,7 @@ func TestUIPolicyCreateEditDelete(t *testing.T) {
 	assert.Equal(t, "Updated Policy", got.Name)
 	assert.Equal(t, "staging", got.Environment)
 
-	req = httptest.NewRequest("POST", "/ui/policies/"+id+"/delete", nil)
+	req = httptest.NewRequest("POST", "/admin/policies/"+id+"/delete", nil)
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusSeeOther, rr.Code)
@@ -129,7 +129,7 @@ func TestUIEditSecretNotFound(t *testing.T) {
 	mux := http.NewServeMux()
 	h.Register(mux)
 
-	req := httptest.NewRequest("GET", "/ui/secrets/nonexistent/edit", nil)
+	req := httptest.NewRequest("GET", "/admin/secrets/nonexistent/edit", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusNotFound, rr.Code)
@@ -141,7 +141,7 @@ func TestUIEditPolicyNotFound(t *testing.T) {
 	mux := http.NewServeMux()
 	h.Register(mux)
 
-	req := httptest.NewRequest("GET", "/ui/policies/nonexistent/edit", nil)
+	req := httptest.NewRequest("GET", "/admin/policies/nonexistent/edit", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusNotFound, rr.Code)
@@ -154,7 +154,7 @@ func TestUIPolicyCreateDefaultRefPattern(t *testing.T) {
 	h.Register(mux)
 
 	form := "name=NoRef&repository_pattern=org/*&project=app&environment=prod"
-	req := httptest.NewRequest("POST", "/ui/policies", strings.NewReader(form))
+	req := httptest.NewRequest("POST", "/admin/policies", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -171,11 +171,11 @@ func TestUIDashboardRedirectBadPath(t *testing.T) {
 	mux := http.NewServeMux()
 	h.Register(mux)
 
-	req := httptest.NewRequest("GET", "/ui/something-else", nil)
+	req := httptest.NewRequest("GET", "/admin/something-else", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusFound, rr.Code)
-	assert.Equal(t, "/ui/", rr.Header().Get("Location"))
+	assert.Equal(t, "/admin/", rr.Header().Get("Location"))
 }
 
 func TestUISecretCreateDuplicate(t *testing.T) {
@@ -187,7 +187,7 @@ func TestUISecretCreateDuplicate(t *testing.T) {
 	h.Register(mux)
 
 	form := "key=DUP_KEY&value=val2&project=proj&environment=env"
-	req := httptest.NewRequest("POST", "/ui/secrets", strings.NewReader(form))
+	req := httptest.NewRequest("POST", "/admin/secrets", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -203,7 +203,7 @@ func TestUIListSecretsWithEnvFilter(t *testing.T) {
 	mux := http.NewServeMux()
 	h.Register(mux)
 
-	req := httptest.NewRequest("GET", "/ui/secrets?project=proj&environment=prod", nil)
+	req := httptest.NewRequest("GET", "/admin/secrets?project=proj&environment=prod", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusOK, rr.Code)
@@ -219,7 +219,7 @@ func TestUIUpdatePolicyViaForm(t *testing.T) {
 	h.Register(mux)
 
 	form := "name=Updated&repository_pattern=org/*&ref_pattern=refs/heads/main&project=app&environment=staging"
-	req := httptest.NewRequest("POST", "/ui/policies/"+p.ID, strings.NewReader(form))
+	req := httptest.NewRequest("POST", "/admin/policies/"+p.ID, strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -239,7 +239,7 @@ func TestUIUpdatePolicyDefaultRefPattern(t *testing.T) {
 	h.Register(mux)
 
 	form := "name=Updated&repository_pattern=org/*&project=app&environment=prod"
-	req := httptest.NewRequest("POST", "/ui/policies/"+p.ID, strings.NewReader(form))
+	req := httptest.NewRequest("POST", "/admin/policies/"+p.ID, strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -257,7 +257,7 @@ func TestUIDeleteSecretViaForm(t *testing.T) {
 	mux := http.NewServeMux()
 	h.Register(mux)
 
-	req := httptest.NewRequest("POST", "/ui/secrets/"+s.ID+"/delete", nil)
+	req := httptest.NewRequest("POST", "/admin/secrets/"+s.ID+"/delete", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusSeeOther, rr.Code)
@@ -274,7 +274,7 @@ func TestUIDeletePolicyViaForm(t *testing.T) {
 	mux := http.NewServeMux()
 	h.Register(mux)
 
-	req := httptest.NewRequest("POST", "/ui/policies/"+p.ID+"/delete", nil)
+	req := httptest.NewRequest("POST", "/admin/policies/"+p.ID+"/delete", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusSeeOther, rr.Code)
@@ -292,7 +292,7 @@ func TestUIUpdateSecretViaForm(t *testing.T) {
 	h.Register(mux)
 
 	form := "key=UPD&value=new_val&project=app&environment=prod"
-	req := httptest.NewRequest("POST", "/ui/secrets/"+s.ID, strings.NewReader(form))
+	req := httptest.NewRequest("POST", "/admin/secrets/"+s.ID, strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -311,7 +311,7 @@ func TestUICreateSecretDBError(t *testing.T) {
 	h.Register(mux)
 
 	form := "key=K&value=v&project=app&environment=prod"
-	req := httptest.NewRequest("POST", "/ui/secrets", strings.NewReader(form))
+	req := httptest.NewRequest("POST", "/admin/secrets", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -325,7 +325,7 @@ func TestUIUpdateSecretDBError(t *testing.T) {
 	h.Register(mux)
 
 	form := "key=K&value=v&project=app&environment=prod"
-	req := httptest.NewRequest("POST", "/ui/secrets/some-id", strings.NewReader(form))
+	req := httptest.NewRequest("POST", "/admin/secrets/some-id", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -339,7 +339,7 @@ func TestUICreatePolicyDBError(t *testing.T) {
 	h.Register(mux)
 
 	form := "name=P&repository_pattern=org/*&ref_pattern=*&project=app&environment=prod"
-	req := httptest.NewRequest("POST", "/ui/policies", strings.NewReader(form))
+	req := httptest.NewRequest("POST", "/admin/policies", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -353,7 +353,7 @@ func TestUIUpdatePolicyDBError(t *testing.T) {
 	h.Register(mux)
 
 	form := "name=P&repository_pattern=org/*&ref_pattern=*&project=app&environment=prod"
-	req := httptest.NewRequest("POST", "/ui/policies/some-id", strings.NewReader(form))
+	req := httptest.NewRequest("POST", "/admin/policies/some-id", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -366,7 +366,7 @@ func TestUIListSecretsDBError(t *testing.T) {
 	mux := http.NewServeMux()
 	h.Register(mux)
 
-	req := httptest.NewRequest("GET", "/ui/secrets", nil)
+	req := httptest.NewRequest("GET", "/admin/secrets", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
@@ -378,7 +378,7 @@ func TestUIListPoliciesDBError(t *testing.T) {
 	mux := http.NewServeMux()
 	h.Register(mux)
 
-	req := httptest.NewRequest("GET", "/ui/policies", nil)
+	req := httptest.NewRequest("GET", "/admin/policies", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
@@ -390,7 +390,7 @@ func TestUIDashboardDBError(t *testing.T) {
 	mux := http.NewServeMux()
 	h.Register(mux)
 
-	req := httptest.NewRequest("GET", "/ui/", nil)
+	req := httptest.NewRequest("GET", "/admin/", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
@@ -402,7 +402,7 @@ func TestUIEditSecretDBError(t *testing.T) {
 	mux := http.NewServeMux()
 	h.Register(mux)
 
-	req := httptest.NewRequest("GET", "/ui/secrets/some-id/edit", nil)
+	req := httptest.NewRequest("GET", "/admin/secrets/some-id/edit", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
@@ -414,7 +414,7 @@ func TestUIEditPolicyDBError(t *testing.T) {
 	mux := http.NewServeMux()
 	h.Register(mux)
 
-	req := httptest.NewRequest("GET", "/ui/policies/some-id/edit", nil)
+	req := httptest.NewRequest("GET", "/admin/policies/some-id/edit", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
@@ -426,7 +426,7 @@ func TestUIDeleteSecretDBError(t *testing.T) {
 	mux := http.NewServeMux()
 	h.Register(mux)
 
-	req := httptest.NewRequest("POST", "/ui/secrets/some-id/delete", nil)
+	req := httptest.NewRequest("POST", "/admin/secrets/some-id/delete", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
@@ -438,7 +438,7 @@ func TestUIDeletePolicyDBError(t *testing.T) {
 	mux := http.NewServeMux()
 	h.Register(mux)
 
-	req := httptest.NewRequest("POST", "/ui/policies/some-id/delete", nil)
+	req := httptest.NewRequest("POST", "/admin/policies/some-id/delete", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
@@ -452,7 +452,7 @@ func TestUIAuditLogPage(t *testing.T) {
 	mux := http.NewServeMux()
 	h.Register(mux)
 
-	req := httptest.NewRequest("GET", "/ui/audit", nil)
+	req := httptest.NewRequest("GET", "/admin/audit", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusOK, rr.Code)
@@ -466,7 +466,7 @@ func TestUIAuditLogPageEmpty(t *testing.T) {
 	mux := http.NewServeMux()
 	h.Register(mux)
 
-	req := httptest.NewRequest("GET", "/ui/audit", nil)
+	req := httptest.NewRequest("GET", "/admin/audit", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusOK, rr.Code)
@@ -479,7 +479,7 @@ func TestUIAuditLogDBError(t *testing.T) {
 	mux := http.NewServeMux()
 	h.Register(mux)
 
-	req := httptest.NewRequest("GET", "/ui/audit", nil)
+	req := httptest.NewRequest("GET", "/admin/audit", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)

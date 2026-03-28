@@ -21,7 +21,7 @@ func TestRequireCFAccessNoToken(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	req := httptest.NewRequest("GET", "/ui/", nil)
+	req := httptest.NewRequest("GET", "/admin/", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
@@ -61,7 +61,7 @@ func TestValidateRequestFromHeader(t *testing.T) {
 	v.jwks = &jose.JSONWebKeySet{Keys: []jose.JSONWebKey{pubJWK}}
 	v.fetched = time.Now()
 
-	req := httptest.NewRequest("GET", "/ui/", nil)
+	req := httptest.NewRequest("GET", "/admin/", nil)
 	req.Header.Set("Cf-Access-Jwt-Assertion", token)
 
 	identity, err := v.ValidateRequest(req)
@@ -88,7 +88,7 @@ func TestValidateRequestFromCookie(t *testing.T) {
 	v.jwks = &jose.JSONWebKeySet{Keys: []jose.JSONWebKey{pubJWK}}
 	v.fetched = time.Now()
 
-	req := httptest.NewRequest("GET", "/ui/", nil)
+	req := httptest.NewRequest("GET", "/admin/", nil)
 	req.AddCookie(&http.Cookie{Name: "CF_Authorization", Value: token})
 
 	identity, err := v.ValidateRequest(req)
@@ -114,7 +114,7 @@ func TestValidateRequestExpired(t *testing.T) {
 	v.jwks = &jose.JSONWebKeySet{Keys: []jose.JSONWebKey{pubJWK}}
 	v.fetched = time.Now()
 
-	req := httptest.NewRequest("GET", "/ui/", nil)
+	req := httptest.NewRequest("GET", "/admin/", nil)
 	req.Header.Set("Cf-Access-Jwt-Assertion", token)
 
 	_, err := v.ValidateRequest(req)
@@ -139,7 +139,7 @@ func TestValidateRequestWrongAudience(t *testing.T) {
 	v.jwks = &jose.JSONWebKeySet{Keys: []jose.JSONWebKey{pubJWK}}
 	v.fetched = time.Now()
 
-	req := httptest.NewRequest("GET", "/ui/", nil)
+	req := httptest.NewRequest("GET", "/admin/", nil)
 	req.Header.Set("Cf-Access-Jwt-Assertion", token)
 
 	_, err := v.ValidateRequest(req)
@@ -211,7 +211,7 @@ func TestRequireCFAccessMiddlewareWithValidToken(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	req := httptest.NewRequest("GET", "/ui/", nil)
+	req := httptest.NewRequest("GET", "/admin/", nil)
 	req.Header.Set("Cf-Access-Jwt-Assertion", token)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -225,7 +225,7 @@ func TestValidateRequestInvalidJWT(t *testing.T) {
 	v.jwks = &jose.JSONWebKeySet{Keys: []jose.JSONWebKey{}}
 	v.fetched = time.Now()
 
-	req := httptest.NewRequest("GET", "/ui/", nil)
+	req := httptest.NewRequest("GET", "/admin/", nil)
 	req.Header.Set("Cf-Access-Jwt-Assertion", "not-a-valid-jwt")
 
 	_, err := v.ValidateRequest(req)
@@ -336,7 +336,7 @@ func TestValidateRequestNoMatchingKey(t *testing.T) {
 	v.jwks = &jose.JSONWebKeySet{Keys: []jose.JSONWebKey{otherPub}}
 	v.fetched = time.Now()
 
-	req := httptest.NewRequest("GET", "/ui/", nil)
+	req := httptest.NewRequest("GET", "/admin/", nil)
 	req.Header.Set("Cf-Access-Jwt-Assertion", token)
 
 	_, err := v.ValidateRequest(req)

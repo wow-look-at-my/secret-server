@@ -22,20 +22,21 @@ func NewUIHandler(db *database.DB, audit *database.AuditDB, tmpl *templates.Temp
 }
 
 func (h *UIHandler) Register(mux *http.ServeMux) {
-	mux.HandleFunc("GET /ui/", h.dashboard)
-	mux.HandleFunc("GET /ui/secrets", h.listSecrets)
-	mux.HandleFunc("GET /ui/secrets/new", h.newSecret)
-	mux.HandleFunc("GET /ui/secrets/{id}/edit", h.editSecret)
-	mux.HandleFunc("POST /ui/secrets", h.createSecret)
-	mux.HandleFunc("POST /ui/secrets/{id}", h.updateSecret)
-	mux.HandleFunc("POST /ui/secrets/{id}/delete", h.deleteSecretForm)
-	mux.HandleFunc("GET /ui/policies", h.listPolicies)
-	mux.HandleFunc("GET /ui/policies/new", h.newPolicy)
-	mux.HandleFunc("GET /ui/policies/{id}/edit", h.editPolicy)
-	mux.HandleFunc("POST /ui/policies", h.createPolicy)
-	mux.HandleFunc("POST /ui/policies/{id}", h.updatePolicy)
-	mux.HandleFunc("POST /ui/policies/{id}/delete", h.deletePolicyForm)
-	mux.HandleFunc("GET /ui/audit", h.auditLog)
+	p := AdminPrefix
+	mux.HandleFunc("GET "+p+"/", h.dashboard)
+	mux.HandleFunc("GET "+p+"/secrets", h.listSecrets)
+	mux.HandleFunc("GET "+p+"/secrets/new", h.newSecret)
+	mux.HandleFunc("GET "+p+"/secrets/{id}/edit", h.editSecret)
+	mux.HandleFunc("POST "+p+"/secrets", h.createSecret)
+	mux.HandleFunc("POST "+p+"/secrets/{id}", h.updateSecret)
+	mux.HandleFunc("POST "+p+"/secrets/{id}/delete", h.deleteSecretForm)
+	mux.HandleFunc("GET "+p+"/policies", h.listPolicies)
+	mux.HandleFunc("GET "+p+"/policies/new", h.newPolicy)
+	mux.HandleFunc("GET "+p+"/policies/{id}/edit", h.editPolicy)
+	mux.HandleFunc("POST "+p+"/policies", h.createPolicy)
+	mux.HandleFunc("POST "+p+"/policies/{id}", h.updatePolicy)
+	mux.HandleFunc("POST "+p+"/policies/{id}/delete", h.deletePolicyForm)
+	mux.HandleFunc("GET "+p+"/audit", h.auditLog)
 }
 
 func uiActor(r *http.Request) string {
@@ -51,8 +52,8 @@ func uiActor(r *http.Request) string {
 }
 
 func (h *UIHandler) dashboard(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/ui/" {
-		http.Redirect(w, r, "/ui/", http.StatusFound)
+	if r.URL.Path != AdminPrefix+"/" {
+		http.Redirect(w, r, AdminPrefix+"/", http.StatusFound)
 		return
 	}
 	stats, err := h.db.GetDashboardStats()
@@ -130,7 +131,7 @@ func (h *UIHandler) createSecret(w http.ResponseWriter, r *http.Request) {
 		slog.Error("audit log failed", "error", err)
 	}
 
-	http.Redirect(w, r, "/ui/secrets", http.StatusSeeOther)
+	http.Redirect(w, r, AdminPrefix+"/secrets", http.StatusSeeOther)
 }
 
 func (h *UIHandler) updateSecret(w http.ResponseWriter, r *http.Request) {
@@ -157,7 +158,7 @@ func (h *UIHandler) updateSecret(w http.ResponseWriter, r *http.Request) {
 		slog.Error("audit log failed", "error", err)
 	}
 
-	http.Redirect(w, r, "/ui/secrets", http.StatusSeeOther)
+	http.Redirect(w, r, AdminPrefix+"/secrets", http.StatusSeeOther)
 }
 
 func (h *UIHandler) deleteSecretForm(w http.ResponseWriter, r *http.Request) {
@@ -172,7 +173,7 @@ func (h *UIHandler) deleteSecretForm(w http.ResponseWriter, r *http.Request) {
 		slog.Error("audit log failed", "error", err)
 	}
 
-	http.Redirect(w, r, "/ui/secrets", http.StatusSeeOther)
+	http.Redirect(w, r, AdminPrefix+"/secrets", http.StatusSeeOther)
 }
 
 func (h *UIHandler) listPolicies(w http.ResponseWriter, r *http.Request) {
@@ -240,7 +241,7 @@ func (h *UIHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
 		slog.Error("audit log failed", "error", err)
 	}
 
-	http.Redirect(w, r, "/ui/policies", http.StatusSeeOther)
+	http.Redirect(w, r, AdminPrefix+"/policies", http.StatusSeeOther)
 }
 
 func (h *UIHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
@@ -272,7 +273,7 @@ func (h *UIHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 		slog.Error("audit log failed", "error", err)
 	}
 
-	http.Redirect(w, r, "/ui/policies", http.StatusSeeOther)
+	http.Redirect(w, r, AdminPrefix+"/policies", http.StatusSeeOther)
 }
 
 func (h *UIHandler) deletePolicyForm(w http.ResponseWriter, r *http.Request) {
@@ -287,7 +288,7 @@ func (h *UIHandler) deletePolicyForm(w http.ResponseWriter, r *http.Request) {
 		slog.Error("audit log failed", "error", err)
 	}
 
-	http.Redirect(w, r, "/ui/policies", http.StatusSeeOther)
+	http.Redirect(w, r, AdminPrefix+"/policies", http.StatusSeeOther)
 }
 
 func (h *UIHandler) auditLog(w http.ResponseWriter, r *http.Request) {

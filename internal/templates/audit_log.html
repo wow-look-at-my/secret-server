@@ -28,8 +28,8 @@
 </table>
 
 <div style="margin-top:1rem; display:flex; gap:1rem;">
-    {{if .HasPrev}}<a href="/ui/audit?page={{.PrevPage}}" class="btn">Previous</a>{{end}}
-    {{if .HasNext}}<a href="/ui/audit?page={{.NextPage}}" class="btn">Next</a>{{end}}
+    {{if .HasPrev}}<a href="{{prefix}}/audit?page={{.PrevPage}}" class="btn">Previous</a>{{end}}
+    {{if .HasNext}}<a href="{{prefix}}/audit?page={{.NextPage}}" class="btn">Next</a>{{end}}
 </div>
 {{else}}
 <p class="empty">No audit log entries yet.</p>
