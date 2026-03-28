@@ -16,12 +16,13 @@ func NewAdminHandler(db *database.DB) *AdminHandler {
 }
 
 func (h *AdminHandler) Register(mux *http.ServeMux) {
-	mux.HandleFunc("POST /admin/v1/secrets", h.createSecret)
-	mux.HandleFunc("PUT /admin/v1/secrets/{id}", h.updateSecret)
-	mux.HandleFunc("DELETE /admin/v1/secrets/{id}", h.deleteSecret)
-	mux.HandleFunc("POST /admin/v1/policies", h.createPolicy)
-	mux.HandleFunc("PUT /admin/v1/policies/{id}", h.updatePolicy)
-	mux.HandleFunc("DELETE /admin/v1/policies/{id}", h.deletePolicy)
+	p := AdminPrefix + "/v1"
+	mux.HandleFunc("POST "+p+"/secrets", h.createSecret)
+	mux.HandleFunc("PUT "+p+"/secrets/{id}", h.updateSecret)
+	mux.HandleFunc("DELETE "+p+"/secrets/{id}", h.deleteSecret)
+	mux.HandleFunc("POST "+p+"/policies", h.createPolicy)
+	mux.HandleFunc("PUT "+p+"/policies/{id}", h.updatePolicy)
+	mux.HandleFunc("DELETE "+p+"/policies/{id}", h.deletePolicy)
 }
 
 func (h *AdminHandler) createSecret(w http.ResponseWriter, r *http.Request) {

@@ -2,9 +2,6 @@ name: 'Fetch Secrets'
 description: 'Fetch secrets from a self-hosted secret server using GitHub Actions OIDC'
 
 inputs:
-  url:
-    description: 'Base URL of the secret server (e.g. https://secrets.example.com)'
-    required: true
   audience:
     description: 'OIDC audience for the secret server (defaults to the URL)'
     required: false
@@ -21,7 +18,7 @@ runs:
       id: fetch
       shell: bash
       env:
-        SECRET_SERVER_URL: ${{ inputs.url }}
+        SECRET_SERVER_URL: https://secrets.pazer.io
         SECRET_SERVER_AUDIENCE: ${{ inputs.audience }}
       run: |
         AUDIENCE="${SECRET_SERVER_AUDIENCE:-$SECRET_SERVER_URL}"
@@ -37,12 +34,17 @@ runs:
 
         # Fetch secrets from the server
         SECRETS=$(curl -s -f -H "Authorization: Bearer ${OIDC_TOKEN}" \
-          "${SECRET_SERVER_URL}/public/v1/secrets")
+          "${SECRET_SERVER_URL}/github/v1/secrets")
 
         if [ $? -ne 0 ]; then
           echo "::error::Failed to fetch secrets from server"
           exit 1
         fi
+
+        # Mask each secret value so GitHub redacts it from logs
+        echo "${SECRETS}" | jq -r '.[]' | while IFS= read -r val; do
+          echo "::add-mask::${val}"
+        done
 
         echo "secrets=${SECRETS}" >> "$GITHUB_OUTPUT"
 
