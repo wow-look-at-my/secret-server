@@ -11,12 +11,13 @@ import (
 )
 
 type PublicHandler struct {
-	db       *database.DB
-	oidc     *auth.GitHubOIDCValidator
+	db    *database.DB
+	audit *database.AuditDB
+	oidc  *auth.GitHubOIDCValidator
 }
 
-func NewPublicHandler(db *database.DB, oidc *auth.GitHubOIDCValidator) *PublicHandler {
-	return &PublicHandler{db: db, oidc: oidc}
+func NewPublicHandler(db *database.DB, audit *database.AuditDB, oidc *auth.GitHubOIDCValidator) *PublicHandler {
+	return &PublicHandler{db: db, audit: audit, oidc: oidc}
 }
 
 func (h *PublicHandler) Register(mux *http.ServeMux) {
@@ -80,6 +81,21 @@ func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
 		for k, v := range secrets {
 			result[k] = v
 		}
+	}
+
+	policyIDs := make([]string, len(policies))
+	for i, p := range policies {
+		policyIDs[i] = p.ID
+	}
+	details, _ := json.Marshal(map[string]any{
+		"repository":    claims.Repository,
+		"ref":           claims.Ref,
+		"workflow":      claims.Workflow,
+		"policies":      policyIDs,
+		"secrets_count": len(result),
+	})
+	if err := h.audit.CreateEntry("secret.access", "github_actions", claims.Repository, "secret", "", string(details)); err != nil {
+		slog.Error("audit log failed", "error", err)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

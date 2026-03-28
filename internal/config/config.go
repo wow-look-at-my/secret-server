@@ -7,19 +7,21 @@ import (
 )
 
 type Config struct {
-	ListenAddr        string
-	DatabasePath      string
-	EncryptionKey     []byte
+	ListenAddr         string
+	DatabasePath       string
+	AuditDatabasePath  string
+	EncryptionKey      []byte
 	CFAccessTeamDomain string
-	CFAccessAudience  string
-	OIDCAudience      string
-	LogLevel          string
+	CFAccessAudience   string
+	OIDCAudience       string
+	LogLevel           string
 }
 
 func Load() (*Config, error) {
 	cfg := &Config{
-		ListenAddr:        envOrDefault("LISTEN_ADDR", ":8080"),
-		DatabasePath:      envOrDefault("DATABASE_PATH", "./secrets.db"),
+		ListenAddr:         envOrDefault("LISTEN_ADDR", ":8080"),
+		DatabasePath:       envOrDefault("DATABASE_PATH", "./secrets.db"),
+		AuditDatabasePath:  envOrDefault("AUDIT_DATABASE_PATH", "./audit.db"),
 		CFAccessTeamDomain: os.Getenv("CF_ACCESS_TEAM_DOMAIN"),
 		CFAccessAudience:  os.Getenv("CF_ACCESS_AUDIENCE"),
 		OIDCAudience:      os.Getenv("OIDC_AUDIENCE"),

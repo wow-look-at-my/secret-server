@@ -35,7 +35,14 @@ func main() {
 	}
 	defer db.Close()
 
-	mux, err := buildMux(db, cfg)
+	auditDB, err := database.NewAuditDB(cfg.AuditDatabasePath)
+	if err != nil {
+		slog.Error("failed to open audit database", "error", err)
+		os.Exit(1)
+	}
+	defer auditDB.Close()
+
+	mux, err := buildMux(db, auditDB, cfg)
 	if err != nil {
 		slog.Error("failed to build routes", "error", err)
 		os.Exit(1)
@@ -48,7 +55,7 @@ func main() {
 	}
 }
 
-func buildMux(db *database.DB, cfg *config.Config) (*http.ServeMux, error) {
+func buildMux(db *database.DB, auditDB *database.AuditDB, cfg *config.Config) (*http.ServeMux, error) {
 	tmpl, err := templates.New()
 	if err != nil {
 		return nil, err
@@ -60,7 +67,7 @@ func buildMux(db *database.DB, cfg *config.Config) (*http.ServeMux, error) {
 	mux := http.NewServeMux()
 
 	// Public API — GitHub OIDC auth (no CF Access)
-	publicHandler := handlers.NewPublicHandler(db, oidcValidator)
+	publicHandler := handlers.NewPublicHandler(db, auditDB, oidcValidator)
 	publicHandler.Register(mux)
 
 	// Health check (register before catch-all patterns)
@@ -72,7 +79,7 @@ func buildMux(db *database.DB, cfg *config.Config) (*http.ServeMux, error) {
 	// Admin API — behind CF Access
 	cfAdmin := cfValidator.RequireCFAccess(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		adminMux := http.NewServeMux()
-		adminHandler := handlers.NewAdminHandler(db)
+		adminHandler := handlers.NewAdminHandler(db, auditDB)
 		adminHandler.Register(adminMux)
 		adminMux.ServeHTTP(w, r)
 	}))
@@ -85,7 +92,7 @@ func buildMux(db *database.DB, cfg *config.Config) (*http.ServeMux, error) {
 
 	// UI — behind CF Access
 	uiMux := http.NewServeMux()
-	uiHandler := handlers.NewUIHandler(db, tmpl)
+	uiHandler := handlers.NewUIHandler(db, auditDB, tmpl)
 	uiHandler.Register(uiMux)
 	cfUI := cfValidator.RequireCFAccess(uiMux)
 	mux.HandleFunc("GET /ui/", func(w http.ResponseWriter, r *http.Request) { cfUI.ServeHTTP(w, r) })

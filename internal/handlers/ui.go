@@ -1,20 +1,24 @@
 package handlers
 
 import (
+	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 
+	"github.com/wow-look-at-my/secret-server/internal/auth"
 	"github.com/wow-look-at-my/secret-server/internal/database"
 	"github.com/wow-look-at-my/secret-server/internal/templates"
 )
 
 type UIHandler struct {
-	db   *database.DB
-	tmpl *templates.Templates
+	db    *database.DB
+	audit *database.AuditDB
+	tmpl  *templates.Templates
 }
 
-func NewUIHandler(db *database.DB, tmpl *templates.Templates) *UIHandler {
-	return &UIHandler{db: db, tmpl: tmpl}
+func NewUIHandler(db *database.DB, audit *database.AuditDB, tmpl *templates.Templates) *UIHandler {
+	return &UIHandler{db: db, audit: audit, tmpl: tmpl}
 }
 
 func (h *UIHandler) Register(mux *http.ServeMux) {
@@ -31,6 +35,19 @@ func (h *UIHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /ui/policies", h.createPolicy)
 	mux.HandleFunc("POST /ui/policies/{id}", h.updatePolicy)
 	mux.HandleFunc("POST /ui/policies/{id}/delete", h.deletePolicyForm)
+	mux.HandleFunc("GET /ui/audit", h.auditLog)
+}
+
+func uiActor(r *http.Request) string {
+	if id := auth.CFIdentityFromContext(r.Context()); id != nil {
+		if id.Email != "" {
+			return id.Email
+		}
+		if id.Subject != "" {
+			return id.Subject
+		}
+	}
+	return "unknown"
 }
 
 func (h *UIHandler) dashboard(w http.ResponseWriter, r *http.Request) {
@@ -92,7 +109,7 @@ func (h *UIHandler) createSecret(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
-	_, err := h.db.CreateSecret(
+	secret, err := h.db.CreateSecret(
 		r.FormValue("key"),
 		r.FormValue("value"),
 		r.FormValue("project"),
@@ -107,6 +124,12 @@ func (h *UIHandler) createSecret(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+
+	details, _ := json.Marshal(map[string]string{"key": r.FormValue("key"), "project": r.FormValue("project"), "environment": r.FormValue("environment")})
+	if err := h.audit.CreateEntry("secret.create", "admin", uiActor(r), "secret", secret.ID, string(details)); err != nil {
+		slog.Error("audit log failed", "error", err)
+	}
+
 	http.Redirect(w, r, "/ui/secrets", http.StatusSeeOther)
 }
 
@@ -128,6 +151,12 @@ func (h *UIHandler) updateSecret(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
+
+	details, _ := json.Marshal(map[string]string{"key": r.FormValue("key"), "project": r.FormValue("project"), "environment": r.FormValue("environment")})
+	if err := h.audit.CreateEntry("secret.update", "admin", uiActor(r), "secret", id, string(details)); err != nil {
+		slog.Error("audit log failed", "error", err)
+	}
+
 	http.Redirect(w, r, "/ui/secrets", http.StatusSeeOther)
 }
 
@@ -138,6 +167,11 @@ func (h *UIHandler) deleteSecretForm(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
+
+	if err := h.audit.CreateEntry("secret.delete", "admin", uiActor(r), "secret", id, "{}"); err != nil {
+		slog.Error("audit log failed", "error", err)
+	}
+
 	http.Redirect(w, r, "/ui/secrets", http.StatusSeeOther)
 }
 
@@ -184,7 +218,7 @@ func (h *UIHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
 	if refPattern == "" {
 		refPattern = "*"
 	}
-	_, err := h.db.CreatePolicy(
+	policy, err := h.db.CreatePolicy(
 		r.FormValue("name"),
 		r.FormValue("repository_pattern"),
 		refPattern,
@@ -200,6 +234,12 @@ func (h *UIHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+
+	details, _ := json.Marshal(map[string]string{"name": r.FormValue("name"), "repository_pattern": r.FormValue("repository_pattern"), "project": r.FormValue("project"), "environment": r.FormValue("environment")})
+	if err := h.audit.CreateEntry("policy.create", "admin", uiActor(r), "policy", policy.ID, string(details)); err != nil {
+		slog.Error("audit log failed", "error", err)
+	}
+
 	http.Redirect(w, r, "/ui/policies", http.StatusSeeOther)
 }
 
@@ -226,6 +266,12 @@ func (h *UIHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
+
+	details, _ := json.Marshal(map[string]string{"name": r.FormValue("name"), "repository_pattern": r.FormValue("repository_pattern"), "project": r.FormValue("project"), "environment": r.FormValue("environment")})
+	if err := h.audit.CreateEntry("policy.update", "admin", uiActor(r), "policy", id, string(details)); err != nil {
+		slog.Error("audit log failed", "error", err)
+	}
+
 	http.Redirect(w, r, "/ui/policies", http.StatusSeeOther)
 }
 
@@ -236,5 +282,36 @@ func (h *UIHandler) deletePolicyForm(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
+
+	if err := h.audit.CreateEntry("policy.delete", "admin", uiActor(r), "policy", id, "{}"); err != nil {
+		slog.Error("audit log failed", "error", err)
+	}
+
 	http.Redirect(w, r, "/ui/policies", http.StatusSeeOther)
+}
+
+func (h *UIHandler) auditLog(w http.ResponseWriter, r *http.Request) {
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	perPage := 50
+	offset := (page - 1) * perPage
+
+	entries, err := h.audit.ListEntries(perPage, offset)
+	if err != nil {
+		slog.Error("list audit entries failed", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	total, _ := h.audit.CountEntries()
+
+	h.tmpl.Render(w, "audit_log.html", map[string]any{
+		"Entries":  entries,
+		"Page":     page,
+		"HasNext":  offset+perPage < total,
+		"HasPrev":  page > 1,
+		"NextPage": page + 1,
+		"PrevPage": page - 1,
+	})
 }

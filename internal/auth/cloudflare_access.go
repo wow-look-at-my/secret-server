@@ -12,6 +12,20 @@ import (
 	"github.com/go-jose/go-jose/v4/jwt"
 )
 
+type CFAccessIdentity struct {
+	Subject string
+	Email   string
+}
+
+type contextKey string
+
+const cfIdentityKey contextKey = "cf-identity"
+
+func CFIdentityFromContext(ctx context.Context) *CFAccessIdentity {
+	id, _ := ctx.Value(cfIdentityKey).(*CFAccessIdentity)
+	return id
+}
+
 type CloudflareAccessValidator struct {
 	teamDomain string
 	audience   string
@@ -28,7 +42,7 @@ func NewCloudflareAccessValidator(teamDomain, audience string) *CloudflareAccess
 	}
 }
 
-func (v *CloudflareAccessValidator) ValidateRequest(r *http.Request) error {
+func (v *CloudflareAccessValidator) ValidateRequest(r *http.Request) (*CFAccessIdentity, error) {
 	token := r.Header.Get("Cf-Access-Jwt-Assertion")
 	if token == "" {
 		if cookie, err := r.Cookie("CF_Authorization"); err == nil {
@@ -36,17 +50,17 @@ func (v *CloudflareAccessValidator) ValidateRequest(r *http.Request) error {
 		}
 	}
 	if token == "" {
-		return fmt.Errorf("no CF Access token found")
+		return nil, fmt.Errorf("no CF Access token found")
 	}
 
 	keys, err := v.getKeys(r.Context())
 	if err != nil {
-		return fmt.Errorf("get CF JWKS: %w", err)
+		return nil, fmt.Errorf("get CF JWKS: %w", err)
 	}
 
 	tok, err := jwt.ParseSigned(token, []jose.SignatureAlgorithm{jose.RS256})
 	if err != nil {
-		return fmt.Errorf("parse CF JWT: %w", err)
+		return nil, fmt.Errorf("parse CF JWT: %w", err)
 	}
 
 	var found *jose.JSONWebKey
@@ -60,12 +74,15 @@ func (v *CloudflareAccessValidator) ValidateRequest(r *http.Request) error {
 		}
 	}
 	if found == nil {
-		return fmt.Errorf("no matching key found in CF JWKS")
+		return nil, fmt.Errorf("no matching key found in CF JWKS")
 	}
 
 	stdClaims := jwt.Claims{}
-	if err := tok.Claims(found.Key, &stdClaims); err != nil {
-		return fmt.Errorf("verify CF claims: %w", err)
+	var customClaims struct {
+		Email string `json:"email"`
+	}
+	if err := tok.Claims(found.Key, &stdClaims, &customClaims); err != nil {
+		return nil, fmt.Errorf("verify CF claims: %w", err)
 	}
 
 	expected := jwt.Expected{
@@ -73,19 +90,24 @@ func (v *CloudflareAccessValidator) ValidateRequest(r *http.Request) error {
 		AnyAudience: []string{v.audience},
 	}
 	if err := stdClaims.Validate(expected); err != nil {
-		return fmt.Errorf("validate CF claims: %w", err)
+		return nil, fmt.Errorf("validate CF claims: %w", err)
 	}
 
-	return nil
+	return &CFAccessIdentity{
+		Subject: stdClaims.Subject,
+		Email:   customClaims.Email,
+	}, nil
 }
 
 func (v *CloudflareAccessValidator) RequireCFAccess(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := v.ValidateRequest(r); err != nil {
+		identity, err := v.ValidateRequest(r)
+		if err != nil {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
-		next.ServeHTTP(w, r)
+		ctx := context.WithValue(r.Context(), cfIdentityKey, identity)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
