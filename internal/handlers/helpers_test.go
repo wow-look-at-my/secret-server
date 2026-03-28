@@ -44,7 +44,7 @@ func setup(t *testing.T) *testEnv {
 
 	t.Cleanup(func() { db.Close() })
 
-	tmpl, err := templates.New()
+	tmpl, err := templates.New(AdminPrefix)
 	require.Nil(t, err)
 
 	rsaKey, _ := rsa.GenerateKey(rand.Reader, 2048)

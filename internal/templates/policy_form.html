@@ -5,7 +5,7 @@
 
 {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
 
-<form method="post" action="{{if .IsNew}}/ui/policies{{else}}/ui/policies/{{.Policy.ID}}{{end}}">
+<form method="post" action="{{if .IsNew}}{{prefix}}/policies{{else}}{{prefix}}/policies/{{.Policy.ID}}{{end}}">
     <div class="form-group">
         <label for="name">Name</label>
         <input type="text" id="name" name="name" required
@@ -43,7 +43,7 @@
 
     <div class="actions">
         <button type="submit" class="btn btn-primary">{{if .IsNew}}Create{{else}}Update{{end}}</button>
-        <a href="/ui/policies" class="btn">Cancel</a>
+        <a href="{{prefix}}/policies" class="btn">Cancel</a>
     </div>
 </form>
 

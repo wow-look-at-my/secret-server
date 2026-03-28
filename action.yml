@@ -34,7 +34,7 @@ runs:
 
         # Fetch secrets from the server
         SECRETS=$(curl -s -f -H "Authorization: Bearer ${OIDC_TOKEN}" \
-          "${SECRET_SERVER_URL}/public/v1/secrets")
+          "${SECRET_SERVER_URL}/github/v1/secrets")
 
         if [ $? -ne 0 ]; then
           echo "::error::Failed to fetch secrets from server"

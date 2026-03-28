@@ -14,8 +14,11 @@ type Templates struct {
 	tmpl *template.Template
 }
 
-func New() (*Templates, error) {
-	tmpl, err := template.ParseFS(templateFS, "*.html")
+func New(adminPrefix string) (*Templates, error) {
+	funcs := template.FuncMap{
+		"prefix": func() string { return adminPrefix },
+	}
+	tmpl, err := template.New("").Funcs(funcs).ParseFS(templateFS, "*.html")
 	if err != nil {
 		return nil, err
 	}

@@ -1,5 +1,5 @@
-server
-secret-server
+/server
+/secret-server
 *.db
 *.exe
 /build/
