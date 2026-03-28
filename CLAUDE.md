@@ -41,4 +41,4 @@ All via environment variables. Required: `ENCRYPTION_KEY`, `CF_ACCESS_TEAM_DOMAI
 
 ## CI
 
-Uses `wow-look-at-my/go-toolchain@v1` GitHub Action. Triggered on every push. No PRs merge without passing CI.
+Downloads `go-toolchain` binary in CI and runs it. Triggered on every push. No PRs merge without passing CI.
