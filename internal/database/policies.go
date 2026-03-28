@@ -69,16 +69,36 @@ func (d *DB) ListPolicies() ([]Policy, error) {
 }
 
 func (d *DB) UpdatePolicy(id, name, repoPattern, refPattern, project, environment string) error {
-	_, err := d.db.Exec(
+	result, err := d.db.Exec(
 		"UPDATE access_policies SET name = ?, repository_pattern = ?, ref_pattern = ?, project = ?, environment = ? WHERE id = ?",
 		name, repoPattern, refPattern, project, environment, id,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (d *DB) DeletePolicy(id string) error {
-	_, err := d.db.Exec("DELETE FROM access_policies WHERE id = ?", id)
-	return err
+	result, err := d.db.Exec("DELETE FROM access_policies WHERE id = ?", id)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // MatchingPolicies returns policies that match the given repository and ref using glob patterns.
