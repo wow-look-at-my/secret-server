@@ -63,7 +63,7 @@ func buildMux(db *database.DB, cfg *config.Config) (*http.ServeMux, error) {
 	publicHandler := handlers.NewPublicHandler(db, oidcValidator)
 	publicHandler.Register(mux)
 
-	// Health check (register before catch-all patterns)
+	// Health check — accessed directly, not through CF Access
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
