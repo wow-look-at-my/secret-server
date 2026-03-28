@@ -6,11 +6,12 @@ Self-hosted secrets manager for homelab use. Single Go binary with SQLite storag
 
 | Zone | Routes | Auth | Access |
 |------|--------|------|--------|
-| Public API | `POST /public/v1/secrets` | GitHub Actions OIDC JWT | Read-only — vend secrets matching policies |
-| Admin API | `/admin/v1/*` | Cloudflare Access JWT | Full CRUD for secrets and policies |
-| Admin UI | `/ui/*` | Cloudflare Access JWT | Web UI for managing secrets and policies |
+| GitHub API | `POST /github/v1/secrets` | GitHub Actions OIDC JWT | Read-only — vend secrets matching policies |
+| Health | `GET /github/health` | None | Health check endpoint |
+| Admin API | `/admin/v1/*` | Cloudflare Access JWT | Create, update, delete secrets and policies |
+| Admin UI | `/admin/*` | Cloudflare Access JWT | Web UI for managing secrets and policies |
 
-The public API validates GitHub Actions OIDC tokens directly. Admin routes are protected by Cloudflare Access (the server validates CF JWTs as defense-in-depth).
+Only two path prefixes matter for Cloudflare Access: protect `/admin/*`, bypass `/github/*`. The GitHub API validates OIDC tokens directly. Admin routes are protected by Cloudflare Access (the server validates CF JWTs as defense-in-depth). The root path `/` redirects to the admin UI.
 
 ## Configuration
 
@@ -20,7 +21,7 @@ All configuration is via environment variables:
 |----------|----------|---------|-------------|
 | `ENCRYPTION_KEY` | Yes | — | 32-byte hex-encoded AES-256 key (64 hex chars) |
 | `CF_ACCESS_TEAM_DOMAIN` | Yes | — | Cloudflare Access team domain (e.g. `myteam`) |
-| `CF_ACCESS_AUDIENCE` | Yes | — | Cloudflare Access application audience tag |
+| `CF_ACCESS_ADMIN_AUDIENCE` | Yes | — | Cloudflare Access application audience tag |
 | `OIDC_AUDIENCE` | No | — | Expected audience for GitHub OIDC tokens |
 | `LISTEN_ADDR` | No | `:8080` | Server listen address |
 | `DATABASE_PATH` | No | `./secrets.db` | Path to SQLite database file |
@@ -46,7 +47,7 @@ docker compose up -d
 ```bash
 export ENCRYPTION_KEY="$(openssl rand -hex 32)"
 export CF_ACCESS_TEAM_DOMAIN="myteam"
-export CF_ACCESS_AUDIENCE="your-cf-audience"
+export CF_ACCESS_ADMIN_AUDIENCE="your-cf-audience"
 ./secret-server
 ```
 
@@ -90,9 +91,9 @@ When a GitHub Actions workflow requests secrets, the server:
 ## Cloudflare Access Setup
 
 1. Create a self-hosted application in Cloudflare Access
-2. Set the application URL to cover `/admin/v1/*` and `/ui/*`
-3. Add a bypass rule for `/public/v1/*` (GitHub OIDC auth is handled by the server)
-4. Configure the `CF_ACCESS_TEAM_DOMAIN` and `CF_ACCESS_AUDIENCE` env vars
+2. Set the application URL to cover `/admin/*` (covers both the API and web UI)
+3. Add a bypass rule for `/github/*` (covers the OIDC API and health check)
+4. Configure the `CF_ACCESS_TEAM_DOMAIN` and `CF_ACCESS_ADMIN_AUDIENCE` env vars
 
 ## Dependencies
 
