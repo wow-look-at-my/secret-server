@@ -18,12 +18,13 @@ import (
 )
 
 type testEnv struct {
-	db   *database.DB
-	tmpl *templates.Templates
-	key  *rsa.PrivateKey
-	jwk  jose.JSONWebKey
-	pub  jose.JSONWebKey
-	oidc *auth.GitHubOIDCValidator
+	db    *database.DB
+	audit *database.AuditDB
+	tmpl  *templates.Templates
+	key   *rsa.PrivateKey
+	jwk   jose.JSONWebKey
+	pub   jose.JSONWebKey
+	oidc  *auth.GitHubOIDCValidator
 }
 
 func setup(t *testing.T) *testEnv {
@@ -42,9 +43,15 @@ func setup(t *testing.T) *testEnv {
 	db, err := database.New(f.Name(), enc)
 	require.Nil(t, err)
 
-	t.Cleanup(func() { db.Close() })
+	auditF, err := os.CreateTemp(t.TempDir(), "test-audit-*.db")
+	require.Nil(t, err)
+	auditF.Close()
+	auditDB, err := database.NewAuditDB(auditF.Name())
+	require.Nil(t, err)
 
-	tmpl, err := templates.New()
+	t.Cleanup(func() { db.Close(); auditDB.Close() })
+
+	tmpl, err := templates.New(AdminPrefix)
 	require.Nil(t, err)
 
 	rsaKey, _ := rsa.GenerateKey(rand.Reader, 2048)
@@ -54,13 +61,14 @@ func setup(t *testing.T) *testEnv {
 	oidc := auth.NewGitHubOIDCValidator("https://secrets.example.com")
 	auth.SetJWKSForTesting(oidc, &jose.JSONWebKeySet{Keys: []jose.JSONWebKey{pub}})
 
-	return &testEnv{db: db, tmpl: tmpl, key: rsaKey, jwk: jwk, pub: pub, oidc: oidc}
+	return &testEnv{db: db, audit: auditDB, tmpl: tmpl, key: rsaKey, jwk: jwk, pub: pub, oidc: oidc}
 }
 
 func setupClosedDB(t *testing.T) *testEnv {
 	t.Helper()
 	env := setup(t)
 	env.db.Close()
+	env.audit.Close()
 	return env
 }
 

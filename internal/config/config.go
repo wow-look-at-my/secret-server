@@ -7,21 +7,23 @@ import (
 )
 
 type Config struct {
-	ListenAddr        string
-	DatabasePath      string
-	EncryptionKey     []byte
-	CFAccessTeamDomain string
-	CFAccessAudience  string
-	OIDCAudience      string
-	LogLevel          string
+	ListenAddr         string
+	DatabasePath       string
+	AuditDatabasePath  string
+	EncryptionKey      []byte
+	CFAccessTeamDomain    string
+	CFAccessAdminAudience string
+	OIDCAudience          string
+	LogLevel              string
 }
 
 func Load() (*Config, error) {
 	cfg := &Config{
-		ListenAddr:        envOrDefault("LISTEN_ADDR", ":8080"),
-		DatabasePath:      envOrDefault("DATABASE_PATH", "./secrets.db"),
+		ListenAddr:         envOrDefault("LISTEN_ADDR", ":8080"),
+		DatabasePath:       envOrDefault("DATABASE_PATH", "./secrets.db"),
+		AuditDatabasePath:  envOrDefault("AUDIT_DATABASE_PATH", "./audit.db"),
 		CFAccessTeamDomain: os.Getenv("CF_ACCESS_TEAM_DOMAIN"),
-		CFAccessAudience:  os.Getenv("CF_ACCESS_AUDIENCE"),
+		CFAccessAdminAudience:  os.Getenv("CF_ACCESS_ADMIN_AUDIENCE"),
 		OIDCAudience:      os.Getenv("OIDC_AUDIENCE"),
 		LogLevel:          envOrDefault("LOG_LEVEL", "info"),
 	}
@@ -42,8 +44,11 @@ func Load() (*Config, error) {
 	if cfg.CFAccessTeamDomain == "" {
 		return nil, fmt.Errorf("CF_ACCESS_TEAM_DOMAIN is required")
 	}
-	if cfg.CFAccessAudience == "" {
-		return nil, fmt.Errorf("CF_ACCESS_AUDIENCE is required")
+	if cfg.CFAccessAdminAudience == "" {
+		return nil, fmt.Errorf("CF_ACCESS_ADMIN_AUDIENCE is required")
+	}
+	if cfg.OIDCAudience == "" {
+		return nil, fmt.Errorf("OIDC_AUDIENCE is required")
 	}
 
 	return cfg, nil

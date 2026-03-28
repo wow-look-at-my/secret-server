@@ -1,0 +1,39 @@
+{{template "head" .}}
+{{define "title"}}Audit Log - Secret Server{{end}}
+
+<h1>Audit Log</h1>
+<p class="page-desc">Record of all secret and policy changes. Shows who did what and when.</p>
+
+{{if .Entries}}
+<table>
+    <thead>
+        <tr>
+            <th>Time</th>
+            <th>Action</th>
+            <th>Actor</th>
+            <th>Resource</th>
+            <th>Details</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{range .Entries}}
+        <tr>
+            <td>{{.Timestamp.Format "2006-01-02 15:04:05"}}</td>
+            <td><code>{{.Action}}</code></td>
+            <td>{{.ActorType}}: {{.ActorID}}</td>
+            <td>{{.ResourceType}}{{if .ResourceID}} {{.ResourceID}}{{end}}</td>
+            <td><code style="font-size:0.8rem; word-break:break-all;">{{.Details}}</code></td>
+        </tr>
+        {{end}}
+    </tbody>
+</table>
+
+<div style="margin-top:1rem; display:flex; gap:1rem;">
+    {{if .HasPrev}}<a href="{{prefix}}/audit?page={{.PrevPage}}" class="btn">Previous</a>{{end}}
+    {{if .HasNext}}<a href="{{prefix}}/audit?page={{.NextPage}}" class="btn">Next</a>{{end}}
+</div>
+{{else}}
+<p class="empty">No audit log entries yet.</p>
+{{end}}
+
+{{template "foot" .}}

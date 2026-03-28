@@ -21,7 +21,7 @@ func TestRequireCFAccessNoToken(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	req := httptest.NewRequest("GET", "/ui/", nil)
+	req := httptest.NewRequest("GET", "/admin/", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
@@ -51,18 +51,23 @@ func TestValidateRequestFromHeader(t *testing.T) {
 		NotBefore: jwt.NewNumericDate(time.Now().Add(-time.Minute)),
 		IssuedAt:  jwt.NewNumericDate(time.Now()),
 	}
-	token, err := jwt.Signed(signer).Claims(claims).Serialize()
+	customClaims := struct {
+		Email string `json:"email"`
+	}{Email: "admin@example.com"}
+	token, err := jwt.Signed(signer).Claims(claims).Claims(customClaims).Serialize()
 	require.Nil(t, err)
 
 	v := NewCloudflareAccessValidator("team", "test-aud")
 	v.jwks = &jose.JSONWebKeySet{Keys: []jose.JSONWebKey{pubJWK}}
 	v.fetched = time.Now()
 
-	req := httptest.NewRequest("GET", "/ui/", nil)
+	req := httptest.NewRequest("GET", "/admin/", nil)
 	req.Header.Set("Cf-Access-Jwt-Assertion", token)
 
-	err = v.ValidateRequest(req)
+	identity, err := v.ValidateRequest(req)
 	assert.Nil(t, err)
+	require.NotNil(t, identity)
+	assert.Equal(t, "admin@example.com", identity.Email)
 }
 
 func TestValidateRequestFromCookie(t *testing.T) {
@@ -83,11 +88,12 @@ func TestValidateRequestFromCookie(t *testing.T) {
 	v.jwks = &jose.JSONWebKeySet{Keys: []jose.JSONWebKey{pubJWK}}
 	v.fetched = time.Now()
 
-	req := httptest.NewRequest("GET", "/ui/", nil)
+	req := httptest.NewRequest("GET", "/admin/", nil)
 	req.AddCookie(&http.Cookie{Name: "CF_Authorization", Value: token})
 
-	err := v.ValidateRequest(req)
+	identity, err := v.ValidateRequest(req)
 	assert.Nil(t, err)
+	require.NotNil(t, identity)
 }
 
 func TestValidateRequestExpired(t *testing.T) {
@@ -108,10 +114,10 @@ func TestValidateRequestExpired(t *testing.T) {
 	v.jwks = &jose.JSONWebKeySet{Keys: []jose.JSONWebKey{pubJWK}}
 	v.fetched = time.Now()
 
-	req := httptest.NewRequest("GET", "/ui/", nil)
+	req := httptest.NewRequest("GET", "/admin/", nil)
 	req.Header.Set("Cf-Access-Jwt-Assertion", token)
 
-	err := v.ValidateRequest(req)
+	_, err := v.ValidateRequest(req)
 	require.NotNil(t, err)
 }
 
@@ -133,10 +139,10 @@ func TestValidateRequestWrongAudience(t *testing.T) {
 	v.jwks = &jose.JSONWebKeySet{Keys: []jose.JSONWebKey{pubJWK}}
 	v.fetched = time.Now()
 
-	req := httptest.NewRequest("GET", "/ui/", nil)
+	req := httptest.NewRequest("GET", "/admin/", nil)
 	req.Header.Set("Cf-Access-Jwt-Assertion", token)
 
-	err := v.ValidateRequest(req)
+	_, err := v.ValidateRequest(req)
 	require.NotNil(t, err)
 }
 
@@ -205,7 +211,7 @@ func TestRequireCFAccessMiddlewareWithValidToken(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	req := httptest.NewRequest("GET", "/ui/", nil)
+	req := httptest.NewRequest("GET", "/admin/", nil)
 	req.Header.Set("Cf-Access-Jwt-Assertion", token)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -219,10 +225,10 @@ func TestValidateRequestInvalidJWT(t *testing.T) {
 	v.jwks = &jose.JSONWebKeySet{Keys: []jose.JSONWebKey{}}
 	v.fetched = time.Now()
 
-	req := httptest.NewRequest("GET", "/ui/", nil)
+	req := httptest.NewRequest("GET", "/admin/", nil)
 	req.Header.Set("Cf-Access-Jwt-Assertion", "not-a-valid-jwt")
 
-	err := v.ValidateRequest(req)
+	_, err := v.ValidateRequest(req)
 	require.NotNil(t, err)
 }
 
@@ -259,6 +265,58 @@ func TestCFAccessGetKeysDoubleCheckCache(t *testing.T) {
 	assert.Equal(t, "dc", keys.Keys[0].KeyID)
 }
 
+func TestCFIdentityFromContext(t *testing.T) {
+	id := &CFAccessIdentity{Subject: "sub123", Email: "user@example.com"}
+	ctx := context.WithValue(context.Background(), cfIdentityKey, id)
+	got := CFIdentityFromContext(ctx)
+	require.NotNil(t, got)
+	assert.Equal(t, "sub123", got.Subject)
+	assert.Equal(t, "user@example.com", got.Email)
+
+	// nil when not set
+	got = CFIdentityFromContext(context.Background())
+	assert.Nil(t, got)
+}
+
+func TestRequireCFAccessSetsIdentityInContext(t *testing.T) {
+	key, _ := rsa.GenerateKey(rand.Reader, 2048)
+	jwk := jose.JSONWebKey{Key: key, KeyID: "ctx", Algorithm: "RS256"}
+	pubJWK := jose.JSONWebKey{Key: &key.PublicKey, KeyID: "ctx", Algorithm: "RS256"}
+
+	signer, _ := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: jwk}, (&jose.SignerOptions{}).WithType("JWT"))
+	stdClaims := jwt.Claims{
+		Subject:   "test-subject",
+		Audience:  jwt.Audience{"aud"},
+		Expiry:    jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		NotBefore: jwt.NewNumericDate(time.Now().Add(-time.Minute)),
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
+	}
+	customClaims := struct {
+		Email string `json:"email"`
+	}{Email: "test@example.com"}
+	token, _ := jwt.Signed(signer).Claims(stdClaims).Claims(customClaims).Serialize()
+
+	v := NewCloudflareAccessValidator("team", "aud")
+	v.jwks = &jose.JSONWebKeySet{Keys: []jose.JSONWebKey{pubJWK}}
+	v.fetched = time.Now()
+
+	var capturedIdentity *CFAccessIdentity
+	handler := v.RequireCFAccess(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedIdentity = CFIdentityFromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/ui/", nil)
+	req.Header.Set("Cf-Access-Jwt-Assertion", token)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	require.NotNil(t, capturedIdentity)
+	assert.Equal(t, "test-subject", capturedIdentity.Subject)
+	assert.Equal(t, "test@example.com", capturedIdentity.Email)
+}
+
 func TestValidateRequestNoMatchingKey(t *testing.T) {
 	key, _ := rsa.GenerateKey(rand.Reader, 2048)
 	jwk := jose.JSONWebKey{Key: key, KeyID: "signing-key", Algorithm: "RS256"}
@@ -278,9 +336,9 @@ func TestValidateRequestNoMatchingKey(t *testing.T) {
 	v.jwks = &jose.JSONWebKeySet{Keys: []jose.JSONWebKey{otherPub}}
 	v.fetched = time.Now()
 
-	req := httptest.NewRequest("GET", "/ui/", nil)
+	req := httptest.NewRequest("GET", "/admin/", nil)
 	req.Header.Set("Cf-Access-Jwt-Assertion", token)
 
-	err := v.ValidateRequest(req)
+	_, err := v.ValidateRequest(req)
 	require.NotNil(t, err)
 }

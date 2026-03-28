@@ -3,8 +3,9 @@
 
 <div class="toolbar">
     <h1>Access Policies</h1>
-    <a href="/ui/policies/new" class="btn btn-primary">New Policy</a>
+    <a href="{{prefix}}/policies/new" class="btn btn-primary">New Policy</a>
 </div>
+<p class="page-desc">Access policies control which GitHub repositories can fetch secrets. Each policy grants a repository pattern access to all secrets in a specific project and environment.</p>
 
 {{if .}}
 <table>
@@ -27,8 +28,9 @@
             <td>{{.Project}}</td>
             <td>{{.Environment}}</td>
             <td>
-                <a href="/ui/policies/{{.ID}}/edit" class="btn btn-sm">Edit</a>
-                <form class="inline" method="post" action="/ui/policies/{{.ID}}/delete" onsubmit="return confirm('Delete this policy?')">
+                <a href="{{prefix}}/policies/{{.ID}}/edit" class="btn btn-sm">Edit</a>
+                <form class="inline" method="post" action="{{prefix}}/policies/{{.ID}}/delete" onsubmit="return confirm('Delete this policy?')">
+                    {{with csrfToken}}<input type="hidden" name="csrf_token" value="{{.}}">{{end}}
                     <button type="submit" class="btn btn-sm btn-danger">Delete</button>
                 </form>
             </td>
@@ -37,7 +39,7 @@
     </tbody>
 </table>
 {{else}}
-<p class="empty">No policies yet. <a href="/ui/policies/new">Create one</a>.</p>
+<p class="empty">No policies yet. <a href="{{prefix}}/policies/new">Create one</a>.</p>
 {{end}}
 
 {{template "foot" .}}

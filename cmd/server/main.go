@@ -8,6 +8,7 @@ import (
 	"github.com/wow-look-at-my/secret-server/internal/auth"
 	"github.com/wow-look-at-my/secret-server/internal/config"
 	"github.com/wow-look-at-my/secret-server/internal/crypto"
+	"github.com/wow-look-at-my/secret-server/internal/csrf"
 	"github.com/wow-look-at-my/secret-server/internal/database"
 	"github.com/wow-look-at-my/secret-server/internal/handlers"
 	"github.com/wow-look-at-my/secret-server/internal/templates"
@@ -35,7 +36,14 @@ func main() {
 	}
 	defer db.Close()
 
-	mux, err := buildMux(db, cfg)
+	auditDB, err := database.NewAuditDB(cfg.AuditDatabasePath)
+	if err != nil {
+		slog.Error("failed to open audit database", "error", err)
+		os.Exit(1)
+	}
+	defer auditDB.Close()
+
+	mux, err := buildMux(db, auditDB, cfg)
 	if err != nil {
 		slog.Error("failed to build routes", "error", err)
 		os.Exit(1)
@@ -48,52 +56,51 @@ func main() {
 	}
 }
 
-func buildMux(db *database.DB, cfg *config.Config) (*http.ServeMux, error) {
-	tmpl, err := templates.New()
+func buildMux(db *database.DB, auditDB *database.AuditDB, cfg *config.Config) (*http.ServeMux, error) {
+	tmpl, err := templates.New(handlers.AdminPrefix)
 	if err != nil {
 		return nil, err
 	}
 
 	oidcValidator := auth.NewGitHubOIDCValidator(cfg.OIDCAudience)
-	cfValidator := auth.NewCloudflareAccessValidator(cfg.CFAccessTeamDomain, cfg.CFAccessAudience)
+	cfValidator := auth.NewCloudflareAccessValidator(cfg.CFAccessTeamDomain, cfg.CFAccessAdminAudience)
 
 	mux := http.NewServeMux()
 
 	// Public API — GitHub OIDC auth (no CF Access)
-	publicHandler := handlers.NewPublicHandler(db, oidcValidator)
+	publicHandler := handlers.NewPublicHandler(db, auditDB, oidcValidator)
 	publicHandler.Register(mux)
 
-	// Health check (register before catch-all patterns)
+	// Health check — accessed directly, not through CF Access
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	})
 
 	// Admin API — behind CF Access
-	cfAdmin := cfValidator.RequireCFAccess(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		adminMux := http.NewServeMux()
-		adminHandler := handlers.NewAdminHandler(db)
-		adminHandler.Register(adminMux)
-		adminMux.ServeHTTP(w, r)
-	}))
-	mux.HandleFunc("POST /admin/v1/secrets", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
-	mux.HandleFunc("PUT /admin/v1/secrets/{id}", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
-	mux.HandleFunc("DELETE /admin/v1/secrets/{id}", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
-	mux.HandleFunc("POST /admin/v1/policies", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
-	mux.HandleFunc("PUT /admin/v1/policies/{id}", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
-	mux.HandleFunc("DELETE /admin/v1/policies/{id}", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
+	adminMux := http.NewServeMux()
+	adminHandler := handlers.NewAdminHandler(db, auditDB)
+	adminHandler.Register(adminMux)
+	cfAdmin := cfValidator.RequireCFAccess(adminMux)
+	ap := handlers.AdminPrefix + "/v1"
+	mux.HandleFunc("POST "+ap+"/secrets", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
+	mux.HandleFunc("PUT "+ap+"/secrets/{id}", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
+	mux.HandleFunc("DELETE "+ap+"/secrets/{id}", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
+	mux.HandleFunc("POST "+ap+"/policies", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
+	mux.HandleFunc("PUT "+ap+"/policies/{id}", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
+	mux.HandleFunc("DELETE "+ap+"/policies/{id}", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
 
-	// UI — behind CF Access
+	// UI — behind CF Access + CSRF protection
 	uiMux := http.NewServeMux()
-	uiHandler := handlers.NewUIHandler(db, tmpl)
+	uiHandler := handlers.NewUIHandler(db, auditDB, tmpl)
 	uiHandler.Register(uiMux)
-	cfUI := cfValidator.RequireCFAccess(uiMux)
-	mux.HandleFunc("GET /ui/", func(w http.ResponseWriter, r *http.Request) { cfUI.ServeHTTP(w, r) })
-	mux.HandleFunc("POST /ui/", func(w http.ResponseWriter, r *http.Request) { cfUI.ServeHTTP(w, r) })
+	cfUI := cfValidator.RequireCFAccess(csrf.Protect(uiMux))
+	mux.HandleFunc("GET "+handlers.AdminPrefix+"/", func(w http.ResponseWriter, r *http.Request) { cfUI.ServeHTTP(w, r) })
+	mux.HandleFunc("POST "+handlers.AdminPrefix+"/", func(w http.ResponseWriter, r *http.Request) { cfUI.ServeHTTP(w, r) })
 
-	// Redirect root to UI
+	// Redirect root to admin UI
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/ui/", http.StatusFound)
+		http.Redirect(w, r, handlers.AdminPrefix+"/", http.StatusFound)
 	})
 
 	return mux, nil

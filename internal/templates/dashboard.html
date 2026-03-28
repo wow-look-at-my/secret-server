@@ -2,6 +2,7 @@
 {{define "title"}}Dashboard - Secret Server{{end}}
 
 <h1>Dashboard</h1>
+<p class="page-desc">Overview of all secrets and access policies managed by this server.</p>
 
 <div class="stat-grid">
     <div class="stat-card">
@@ -35,7 +36,7 @@
     </tbody>
 </table>
 {{else}}
-<p class="empty">No secrets yet. <a href="/ui/secrets/new">Create one</a>.</p>
+<p class="empty">No secrets yet. <a href="{{prefix}}/secrets/new">Create one</a>.</p>
 {{end}}
 
 {{template "foot" .}}

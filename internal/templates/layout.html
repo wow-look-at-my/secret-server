@@ -116,13 +116,16 @@
         .secret-value { font-family: monospace; }
         .error { background: var(--danger); color: #fff; padding: 0.75rem 1rem; border-radius: 4px; margin-bottom: 1rem; }
         .empty { color: var(--muted); text-align: center; padding: 2rem; }
+        .hint { font-size: 0.8rem; color: var(--muted); margin-top: 0.2rem; }
+        .page-desc { color: var(--muted); margin-bottom: 1rem; margin-top: -0.5rem; }
     </style>
 </head>
 <body>
 <nav>
-    <a href="/ui/" class="brand">Secret Server</a>
-    <a href="/ui/secrets">Secrets</a>
-    <a href="/ui/policies">Policies</a>
+    <a href="{{prefix}}/" class="brand">Secret Server</a>
+    <a href="{{prefix}}/secrets">Secrets</a>
+    <a href="{{prefix}}/policies">Policies</a>
+    <a href="{{prefix}}/audit">Audit Log</a>
 </nav>
 <main>
 {{end}}

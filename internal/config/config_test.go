@@ -24,7 +24,8 @@ func validEnv(t *testing.T) {
 	setEnv(t, map[string]string{
 		"ENCRYPTION_KEY":		hex.EncodeToString(key),
 		"CF_ACCESS_TEAM_DOMAIN":	"myteam",
-		"CF_ACCESS_AUDIENCE":		"aud123",
+		"CF_ACCESS_ADMIN_AUDIENCE":		"aud123",
+		"OIDC_AUDIENCE":		"https://secrets.example.com",
 	})
 }
 
@@ -41,7 +42,9 @@ func TestLoadValid(t *testing.T) {
 
 	assert.Equal(t, "myteam", cfg.CFAccessTeamDomain)
 
-	assert.Equal(t, "aud123", cfg.CFAccessAudience)
+	assert.Equal(t, "aud123", cfg.CFAccessAdminAudience)
+
+	assert.Equal(t, "https://secrets.example.com", cfg.OIDCAudience)
 
 }
 
@@ -70,7 +73,7 @@ func TestLoadMissingEncryptionKey(t *testing.T) {
 	setEnv(t, map[string]string{
 		"ENCRYPTION_KEY":		"",
 		"CF_ACCESS_TEAM_DOMAIN":	"team",
-		"CF_ACCESS_AUDIENCE":		"aud",
+		"CF_ACCESS_ADMIN_AUDIENCE":		"aud",
 	})
 	os.Unsetenv("ENCRYPTION_KEY")
 	_, err := Load()
@@ -82,7 +85,7 @@ func TestLoadBadHexKey(t *testing.T) {
 	setEnv(t, map[string]string{
 		"ENCRYPTION_KEY":		"not-hex",
 		"CF_ACCESS_TEAM_DOMAIN":	"team",
-		"CF_ACCESS_AUDIENCE":		"aud",
+		"CF_ACCESS_ADMIN_AUDIENCE":		"aud",
 	})
 	_, err := Load()
 	require.NotNil(t, err)
@@ -93,7 +96,7 @@ func TestLoadWrongKeyLength(t *testing.T) {
 	setEnv(t, map[string]string{
 		"ENCRYPTION_KEY":		hex.EncodeToString(make([]byte, 16)),
 		"CF_ACCESS_TEAM_DOMAIN":	"team",
-		"CF_ACCESS_AUDIENCE":		"aud",
+		"CF_ACCESS_ADMIN_AUDIENCE":		"aud",
 	})
 	_, err := Load()
 	require.NotNil(t, err)
@@ -105,7 +108,7 @@ func TestLoadMissingCFTeamDomain(t *testing.T) {
 	setEnv(t, map[string]string{
 		"ENCRYPTION_KEY":		hex.EncodeToString(key),
 		"CF_ACCESS_TEAM_DOMAIN":	"",
-		"CF_ACCESS_AUDIENCE":		"aud",
+		"CF_ACCESS_ADMIN_AUDIENCE":		"aud",
 	})
 	os.Unsetenv("CF_ACCESS_TEAM_DOMAIN")
 	_, err := Load()
@@ -118,9 +121,18 @@ func TestLoadMissingCFAudience(t *testing.T) {
 	setEnv(t, map[string]string{
 		"ENCRYPTION_KEY":		hex.EncodeToString(key),
 		"CF_ACCESS_TEAM_DOMAIN":	"team",
-		"CF_ACCESS_AUDIENCE":		"",
+		"CF_ACCESS_ADMIN_AUDIENCE":		"",
 	})
-	os.Unsetenv("CF_ACCESS_AUDIENCE")
+	os.Unsetenv("CF_ACCESS_ADMIN_AUDIENCE")
+	_, err := Load()
+	require.NotNil(t, err)
+
+}
+
+func TestLoadMissingOIDCAudience(t *testing.T) {
+	validEnv(t)
+	t.Setenv("OIDC_AUDIENCE", "")
+	os.Unsetenv("OIDC_AUDIENCE")
 	_, err := Load()
 	require.NotNil(t, err)
 

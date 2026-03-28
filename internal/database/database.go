@@ -2,12 +2,16 @@ package database
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/wow-look-at-my/secret-server/internal/crypto"
 
 	_ "modernc.org/sqlite"
 )
+
+// ErrNotFound is returned when an update or delete affects zero rows.
+var ErrNotFound = errors.New("not found")
 
 type DB struct {
 	db        *sql.DB

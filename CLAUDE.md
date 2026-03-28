@@ -1,42 +1,43 @@
-# CLAUDE.md
+# secret-server
 
-## Project overview
+Self-hosted secrets manager. Single Go binary, SQLite storage, two auth zones.
 
-Self-hosted secrets manager for homelab GitHub Actions. Single Go binary, SQLite storage, two auth zones (GitHub OIDC for public API, Cloudflare Access for admin).
-
-## Build and test
+## Build & Test
 
 ```bash
 go-toolchain
 ```
 
-This handles mod tidy, testing, coverage, and building. Do NOT use `go build`, `go test`, or other bare `go` commands directly.
+This runs mod tidy, vet, tests with coverage, and builds. Do not use bare `go` commands.
 
-## Project structure
+## Architecture
 
-```
-cmd/server/          Entry point (main.go)
-internal/
-  auth/              GitHub OIDC + Cloudflare Access JWT validation
-  config/            Configuration loading from env vars
-  crypto/            AES-256-GCM encryption/decryption
-  database/          SQLite layer (secrets, policies, glob matching)
-  handlers/          HTTP handlers (public API, admin API, web UI)
-  templates/         HTML templates for web UI
-action.yml           GitHub Action composite (fetch secrets in workflows)
-docker-compose.yml   Multi-stage Docker build + deployment
-```
+Two path prefixes for Cloudflare Access:
 
-## Key architecture decisions
+- `/admin/*` — protected (API + web UI)
+- `/github/*` — bypassed (GitHub Actions OIDC)
+- `/health` — not routed through CF Access (Docker/uptime checks)
 
-- **Two auth zones**: Public API uses GitHub OIDC tokens validated against GitHub's JWKS. Admin routes use Cloudflare Access JWTs.
+Route constants are in `internal/handlers/routes.go`. Templates use `{{prefix}}` to
+reference the admin UI prefix.
+
 - **Encryption at rest**: Secrets are AES-256-GCM encrypted in SQLite, base64-encoded. Decrypted only in memory on retrieval.
 - **Policy-based access**: Glob patterns on repository name + git ref determine which secrets a workflow can access.
 - **Pure-Go SQLite**: Uses `modernc.org/sqlite` (no CGO required). CGO is disabled in the build.
 
+## Key packages
+
+- `cmd/server` — entrypoint, route wiring
+- `internal/auth` — CF Access JWT + GitHub OIDC validation
+- `internal/config` — env var loading
+- `internal/crypto` — AES-256 encryption for secret values
+- `internal/database` — SQLite via modernc.org/sqlite
+- `internal/handlers` — HTTP handlers (admin API, public API, UI)
+- `internal/templates` — embedded HTML templates
+
 ## Configuration
 
-All via environment variables. Required: `ENCRYPTION_KEY`, `CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUDIENCE`. See README.md for full table.
+All via environment variables. Required: `ENCRYPTION_KEY`, `CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_ADMIN_AUDIENCE`. See README.md for full table.
 
 ## CI
 
