@@ -12,6 +12,7 @@
         <input type="text" id="name" name="name" required
             value="{{if .IsNew}}{{else}}{{.Policy.Name}}{{end}}"
             placeholder="e.g. Allow myapp prod deploys">
+        <div class="hint">A human-readable label for this policy.</div>
     </div>
 
     <div class="form-group">
@@ -19,6 +20,7 @@
         <input type="text" id="repository_pattern" name="repository_pattern" required
             value="{{if .IsNew}}{{else}}{{.Policy.RepositoryPattern}}{{end}}"
             placeholder="e.g. wow-look-at-my/* or owner/repo">
+        <div class="hint">GitHub repository to grant access to. Use owner/repo for a single repo, or owner/* for all repos in an org.</div>
     </div>
 
     <div class="form-group">
@@ -26,6 +28,7 @@
         <input type="text" id="ref_pattern" name="ref_pattern"
             value="{{if .IsNew}}*{{else}}{{.Policy.RefPattern}}{{end}}"
             placeholder="e.g. refs/heads/main or *">
+        <div class="hint">Git ref filter (e.g. refs/heads/main). Use * to allow any branch or tag.</div>
     </div>
 
     <div class="form-group">
@@ -33,6 +36,7 @@
         <input type="text" id="project" name="project" required
             value="{{if .IsNew}}{{else}}{{.Policy.Project}}{{end}}"
             placeholder="e.g. myapp">
+        <div class="hint">The project whose secrets this policy grants access to.</div>
     </div>
 
     <div class="form-group">
@@ -40,6 +44,7 @@
         <input type="text" id="environment" name="environment" required
             value="{{if .IsNew}}{{else}}{{.Policy.Environment}}{{end}}"
             placeholder="e.g. prod">
+        <div class="hint">The environment whose secrets this policy grants access to.</div>
     </div>
 
     <div class="actions">
