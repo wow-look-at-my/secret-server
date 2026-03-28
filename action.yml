@@ -41,12 +41,14 @@ runs:
           exit 1
         fi
 
-        # Mask each secret value so GitHub redacts it from logs
-        echo "${SECRETS}" | jq -r '.[]' | while IFS= read -r val; do
+        # Set output using delimiter format (safe for multiline values)
+        delimiter="ghadelimiter_$(openssl rand -hex 8)"
+        printf 'secrets<<%s\n%s\n%s\n' "$delimiter" "$SECRETS" "$delimiter" >> "$GITHUB_OUTPUT"
+
+        # Export each secret as an environment variable using delimiter format
+        echo "${SECRETS}" | jq -r 'to_entries[] | .key' | while IFS= read -r key; do
+          val=$(echo "${SECRETS}" | jq -r --arg k "$key" '.[$k]')
           echo "::add-mask::${val}"
+          delimiter="ghadelimiter_$(openssl rand -hex 8)"
+          printf '%s<<%s\n%s\n%s\n' "$key" "$delimiter" "$val" "$delimiter" >> "$GITHUB_ENV"
         done
-
-        echo "secrets=${SECRETS}" >> "$GITHUB_OUTPUT"
-
-        # Export each secret as an environment variable
-        echo "${SECRETS}" | jq -r 'to_entries[] | "\(.key)=\(.value)"' >> "$GITHUB_ENV"

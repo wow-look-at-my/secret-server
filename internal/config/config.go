@@ -47,6 +47,9 @@ func Load() (*Config, error) {
 	if cfg.CFAccessAdminAudience == "" {
 		return nil, fmt.Errorf("CF_ACCESS_ADMIN_AUDIENCE is required")
 	}
+	if cfg.OIDCAudience == "" {
+		return nil, fmt.Errorf("OIDC_AUDIENCE is required")
+	}
 
 	return cfg, nil
 }

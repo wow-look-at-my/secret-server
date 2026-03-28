@@ -8,6 +8,7 @@ import (
 	"github.com/wow-look-at-my/secret-server/internal/auth"
 	"github.com/wow-look-at-my/secret-server/internal/config"
 	"github.com/wow-look-at-my/secret-server/internal/crypto"
+	"github.com/wow-look-at-my/secret-server/internal/csrf"
 	"github.com/wow-look-at-my/secret-server/internal/database"
 	"github.com/wow-look-at-my/secret-server/internal/handlers"
 	"github.com/wow-look-at-my/secret-server/internal/templates"
@@ -77,12 +78,10 @@ func buildMux(db *database.DB, auditDB *database.AuditDB, cfg *config.Config) (*
 	})
 
 	// Admin API — behind CF Access
-	cfAdmin := cfValidator.RequireCFAccess(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		adminMux := http.NewServeMux()
-		adminHandler := handlers.NewAdminHandler(db, auditDB)
-		adminHandler.Register(adminMux)
-		adminMux.ServeHTTP(w, r)
-	}))
+	adminMux := http.NewServeMux()
+	adminHandler := handlers.NewAdminHandler(db, auditDB)
+	adminHandler.Register(adminMux)
+	cfAdmin := cfValidator.RequireCFAccess(adminMux)
 	ap := handlers.AdminPrefix + "/v1"
 	mux.HandleFunc("POST "+ap+"/secrets", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
 	mux.HandleFunc("PUT "+ap+"/secrets/{id}", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
@@ -91,11 +90,11 @@ func buildMux(db *database.DB, auditDB *database.AuditDB, cfg *config.Config) (*
 	mux.HandleFunc("PUT "+ap+"/policies/{id}", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
 	mux.HandleFunc("DELETE "+ap+"/policies/{id}", func(w http.ResponseWriter, r *http.Request) { cfAdmin.ServeHTTP(w, r) })
 
-	// UI — behind CF Access
+	// UI — behind CF Access + CSRF protection
 	uiMux := http.NewServeMux()
 	uiHandler := handlers.NewUIHandler(db, auditDB, tmpl)
 	uiHandler.Register(uiMux)
-	cfUI := cfValidator.RequireCFAccess(uiMux)
+	cfUI := cfValidator.RequireCFAccess(csrf.Protect(uiMux))
 	mux.HandleFunc("GET "+handlers.AdminPrefix+"/", func(w http.ResponseWriter, r *http.Request) { cfUI.ServeHTTP(w, r) })
 	mux.HandleFunc("POST "+handlers.AdminPrefix+"/", func(w http.ResponseWriter, r *http.Request) { cfUI.ServeHTTP(w, r) })
 

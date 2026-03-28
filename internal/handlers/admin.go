@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -85,7 +86,24 @@ func (h *AdminHandler) updateSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.Value == "" {
+		existing, err := h.db.GetSecret(id)
+		if err != nil {
+			http.Error(w, `{"error":"failed to get secret"}`, http.StatusInternalServerError)
+			return
+		}
+		if existing == nil {
+			http.Error(w, `{"error":"secret not found"}`, http.StatusNotFound)
+			return
+		}
+		req.Value = existing.Value
+	}
+
 	if err := h.db.UpdateSecret(id, req.Key, req.Value, req.Project, req.Environment); err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			http.Error(w, `{"error":"secret not found"}`, http.StatusNotFound)
+			return
+		}
 		http.Error(w, `{"error":"failed to update secret"}`, http.StatusInternalServerError)
 		return
 	}
@@ -101,6 +119,10 @@ func (h *AdminHandler) updateSecret(w http.ResponseWriter, r *http.Request) {
 func (h *AdminHandler) deleteSecret(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := h.db.DeleteSecret(id); err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			http.Error(w, `{"error":"secret not found"}`, http.StatusNotFound)
+			return
+		}
 		http.Error(w, `{"error":"failed to delete secret"}`, http.StatusInternalServerError)
 		return
 	}
@@ -163,6 +185,10 @@ func (h *AdminHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.db.UpdatePolicy(id, req.Name, req.RepositoryPattern, req.RefPattern, req.Project, req.Environment); err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			http.Error(w, `{"error":"policy not found"}`, http.StatusNotFound)
+			return
+		}
 		http.Error(w, `{"error":"failed to update policy"}`, http.StatusInternalServerError)
 		return
 	}
@@ -178,6 +204,10 @@ func (h *AdminHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 func (h *AdminHandler) deletePolicy(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := h.db.DeletePolicy(id); err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			http.Error(w, `{"error":"policy not found"}`, http.StatusNotFound)
+			return
+		}
 		http.Error(w, `{"error":"failed to delete policy"}`, http.StatusInternalServerError)
 		return
 	}

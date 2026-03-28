@@ -135,6 +135,58 @@ func TestUIEditSecretNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, rr.Code)
 }
 
+func TestUIUpdateNonexistentSecret(t *testing.T) {
+	env := setup(t)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	form := "key=K&value=v&project=app&environment=prod"
+	req := httptest.NewRequest("POST", "/admin/secrets/nonexistent", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+func TestUIDeleteNonexistentSecret(t *testing.T) {
+	env := setup(t)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	req := httptest.NewRequest("POST", "/admin/secrets/nonexistent/delete", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+func TestUIUpdateNonexistentPolicy(t *testing.T) {
+	env := setup(t)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	form := "name=P&repository_pattern=org/*&ref_pattern=*&project=app&environment=prod"
+	req := httptest.NewRequest("POST", "/admin/policies/nonexistent", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+func TestUIDeleteNonexistentPolicy(t *testing.T) {
+	env := setup(t)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	req := httptest.NewRequest("POST", "/admin/policies/nonexistent/delete", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
 func TestUIEditPolicyNotFound(t *testing.T) {
 	env := setup(t)
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
@@ -300,6 +352,25 @@ func TestUIUpdateSecretViaForm(t *testing.T) {
 
 	got, _ := env.db.GetSecret(s.ID)
 	assert.Equal(t, "new_val", got.Value)
+}
+
+func TestUIUpdateSecretEmptyValuePreservesExisting(t *testing.T) {
+	env := setup(t)
+	s, _ := env.db.CreateSecret("KEEP", "original_secret", "app", "prod")
+
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	form := "key=KEEP&value=&project=app&environment=prod"
+	req := httptest.NewRequest("POST", "/admin/secrets/"+s.ID, strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusSeeOther, rr.Code)
+
+	got, _ := env.db.GetSecret(s.ID)
+	assert.Equal(t, "original_secret", got.Value)
 }
 
 // DB error tests use a closed database to trigger error paths.
