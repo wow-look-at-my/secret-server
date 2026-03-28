@@ -6,6 +6,7 @@
 {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
 
 <form method="post" action="{{if .IsNew}}{{prefix}}/policies{{else}}{{prefix}}/policies/{{.Policy.ID}}{{end}}">
+    {{with csrfToken}}<input type="hidden" name="csrf_token" value="{{.}}">{{end}}
     <div class="form-group">
         <label for="name">Name</label>
         <input type="text" id="name" name="name" required

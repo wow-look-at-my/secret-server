@@ -67,6 +67,25 @@ func TestAdminUpdateSecret(t *testing.T) {
 	assert.Equal(t, "new", got.Value)
 }
 
+func TestAdminUpdateSecretEmptyValuePreservesExisting(t *testing.T) {
+	env := setup(t)
+	s, _ := env.db.CreateSecret("KEY", "original", "app", "prod")
+
+	h := NewAdminHandler(env.db)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	body := `{"key":"KEY","value":"","project":"app","environment":"prod"}`
+	req := httptest.NewRequest("PUT", "/admin/v1/secrets/"+s.ID, strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusNoContent, rr.Code)
+
+	got, _ := env.db.GetSecret(s.ID)
+	assert.Equal(t, "original", got.Value)
+}
+
 func TestAdminPolicyCRUD(t *testing.T) {
 	env := setup(t)
 	h := NewAdminHandler(env.db)
@@ -122,6 +141,56 @@ func TestAdminCreatePolicyDefaultRefPattern(t *testing.T) {
 
 	policies, _ := env.db.ListPolicies()
 	assert.Equal(t, "*", policies[0].RefPattern)
+}
+
+func TestAdminUpdateNonexistentSecret(t *testing.T) {
+	env := setup(t)
+	h := NewAdminHandler(env.db)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	body := `{"key":"KEY","value":"val","project":"app","environment":"prod"}`
+	req := httptest.NewRequest("PUT", "/admin/v1/secrets/nonexistent", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+func TestAdminDeleteNonexistentSecret(t *testing.T) {
+	env := setup(t)
+	h := NewAdminHandler(env.db)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	req := httptest.NewRequest("DELETE", "/admin/v1/secrets/nonexistent", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+func TestAdminUpdateNonexistentPolicy(t *testing.T) {
+	env := setup(t)
+	h := NewAdminHandler(env.db)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	body := `{"name":"test","repository_pattern":"org/*","ref_pattern":"*","project":"app","environment":"prod"}`
+	req := httptest.NewRequest("PUT", "/admin/v1/policies/nonexistent", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+func TestAdminDeleteNonexistentPolicy(t *testing.T) {
+	env := setup(t)
+	h := NewAdminHandler(env.db)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	req := httptest.NewRequest("DELETE", "/admin/v1/policies/nonexistent", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusNotFound, rr.Code)
 }
 
 func TestAdminInvalidJSON(t *testing.T) {

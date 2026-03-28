@@ -5,6 +5,8 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
+
+	"github.com/wow-look-at-my/secret-server/internal/csrf"
 )
 
 //go:embed *.html
@@ -16,7 +18,8 @@ type Templates struct {
 
 func New(adminPrefix string) (*Templates, error) {
 	funcs := template.FuncMap{
-		"prefix": func() string { return adminPrefix },
+		"prefix":    func() string { return adminPrefix },
+		"csrfToken": func() string { return "" }, // placeholder, overridden per-render
 	}
 	tmpl, err := template.New("").Funcs(funcs).ParseFS(templateFS, "*.html")
 	if err != nil {
@@ -25,9 +28,21 @@ func New(adminPrefix string) (*Templates, error) {
 	return &Templates{tmpl: tmpl}, nil
 }
 
-func (t *Templates) Render(w http.ResponseWriter, name string, data any) {
+func (t *Templates) Render(w http.ResponseWriter, r *http.Request, name string, data any) {
+	token := ""
+	if r != nil {
+		token = csrf.TokenFromContext(r.Context())
+	}
+	tmpl, err := t.tmpl.Clone()
+	if err != nil {
+		slog.Error("template clone failed", "error", err)
+		return
+	}
+	tmpl.Funcs(template.FuncMap{
+		"csrfToken": func() string { return token },
+	})
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := t.tmpl.ExecuteTemplate(w, name, data); err != nil {
+	if err := tmpl.ExecuteTemplate(w, name, data); err != nil {
 		slog.Error("template render failed", "template", name, "error", err)
 	}
 }

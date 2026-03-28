@@ -20,6 +20,7 @@ func TestRenderDashboard(t *testing.T) {
 	require.Nil(t, err)
 
 	rr := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/admin/", nil)
 	data := struct {
 		TotalSecrets	int
 		TotalPolicies	int
@@ -32,7 +33,7 @@ func TestRenderDashboard(t *testing.T) {
 		TotalSecrets:	5,
 		TotalPolicies:	2,
 	}
-	tmpl.Render(rr, "dashboard.html", data)
+	tmpl.Render(rr, req, "dashboard.html", data)
 
 	assert.Equal(t, 200, rr.Code)
 
@@ -44,7 +45,8 @@ func TestRenderDashboard(t *testing.T) {
 func TestRenderSecretsList(t *testing.T) {
 	tmpl, _ := New("/admin")
 	rr := httptest.NewRecorder()
-	tmpl.Render(rr, "secrets_list.html", map[string]any{
+	req := httptest.NewRequest("GET", "/admin/secrets", nil)
+	tmpl.Render(rr, req, "secrets_list.html", map[string]any{
 		"Secrets":	[]any{},
 		"Project":	"",
 		"Environment":	"",
@@ -56,7 +58,8 @@ func TestRenderSecretsList(t *testing.T) {
 func TestRenderSecretForm(t *testing.T) {
 	tmpl, _ := New("/admin")
 	rr := httptest.NewRecorder()
-	tmpl.Render(rr, "secret_form.html", map[string]any{
+	req := httptest.NewRequest("GET", "/admin/secrets/new", nil)
+	tmpl.Render(rr, req, "secret_form.html", map[string]any{
 		"IsNew": true,
 	})
 	assert.Equal(t, 200, rr.Code)
@@ -66,7 +69,8 @@ func TestRenderSecretForm(t *testing.T) {
 func TestRenderPoliciesList(t *testing.T) {
 	tmpl, _ := New("/admin")
 	rr := httptest.NewRecorder()
-	tmpl.Render(rr, "policies_list.html", []any{})
+	req := httptest.NewRequest("GET", "/admin/policies", nil)
+	tmpl.Render(rr, req, "policies_list.html", []any{})
 	assert.Equal(t, 200, rr.Code)
 
 }
@@ -74,7 +78,8 @@ func TestRenderPoliciesList(t *testing.T) {
 func TestRenderPolicyForm(t *testing.T) {
 	tmpl, _ := New("/admin")
 	rr := httptest.NewRecorder()
-	tmpl.Render(rr, "policy_form.html", map[string]any{
+	req := httptest.NewRequest("GET", "/admin/policies/new", nil)
+	tmpl.Render(rr, req, "policy_form.html", map[string]any{
 		"IsNew": true,
 	})
 	assert.Equal(t, 200, rr.Code)
