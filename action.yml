@@ -44,6 +44,11 @@ runs:
           exit 1
         fi
 
+        # Mask each secret value so GitHub redacts it from logs
+        echo "${SECRETS}" | jq -r '.[]' | while IFS= read -r val; do
+          echo "::add-mask::${val}"
+        done
+
         echo "secrets=${SECRETS}" >> "$GITHUB_OUTPUT"
 
         # Export each secret as an environment variable
