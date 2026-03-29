@@ -20,6 +20,11 @@ type Secret struct {
 }
 
 func (d *DB) CreateSecret(key, value, project, environment string) (*Secret, error) {
+	if ok, err := d.EnvironmentExists(project, environment); err != nil {
+		return nil, fmt.Errorf("validate environment: %w", err)
+	} else if !ok {
+		return nil, ErrInvalidEnvironment
+	}
 	id := uuid.New().String()
 	encrypted, err := d.encryptor.Encrypt([]byte(value))
 	if err != nil {
@@ -101,6 +106,11 @@ func (d *DB) ListSecrets(project, environment string) ([]SecretListItem, error) 
 }
 
 func (d *DB) UpdateSecret(id, key, value, project, environment string) error {
+	if ok, err := d.EnvironmentExists(project, environment); err != nil {
+		return fmt.Errorf("validate environment: %w", err)
+	} else if !ok {
+		return ErrInvalidEnvironment
+	}
 	encrypted, err := d.encryptor.Encrypt([]byte(value))
 	if err != nil {
 		return fmt.Errorf("encrypt value: %w", err)
@@ -170,9 +180,10 @@ func (d *DB) GetSecretsByProjectEnv(project, environment string) (map[string]str
 
 // DashboardStats returns counts for the dashboard.
 type DashboardStats struct {
-	TotalSecrets  int
-	TotalPolicies int
-	Projects      []ProjectStats
+	TotalSecrets      int
+	TotalPolicies     int
+	TotalEnvironments int
+	Projects          []ProjectStats
 }
 
 type ProjectStats struct {
@@ -189,6 +200,10 @@ func (d *DB) GetDashboardStats() (*DashboardStats, error) {
 		return nil, err
 	}
 	err = d.db.QueryRow("SELECT COUNT(*) FROM access_policies").Scan(&stats.TotalPolicies)
+	if err != nil {
+		return nil, err
+	}
+	err = d.db.QueryRow("SELECT COUNT(*) FROM environments").Scan(&stats.TotalEnvironments)
 	if err != nil {
 		return nil, err
 	}

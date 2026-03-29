@@ -19,6 +19,11 @@ type Policy struct {
 }
 
 func (d *DB) CreatePolicy(name, repoPattern, refPattern, project, environment string) (*Policy, error) {
+	if ok, err := d.EnvironmentExists(project, environment); err != nil {
+		return nil, fmt.Errorf("validate environment: %w", err)
+	} else if !ok {
+		return nil, ErrInvalidEnvironment
+	}
 	id := uuid.New().String()
 	now := time.Now().UTC()
 	_, err := d.db.Exec(
@@ -69,6 +74,11 @@ func (d *DB) ListPolicies() ([]Policy, error) {
 }
 
 func (d *DB) UpdatePolicy(id, name, repoPattern, refPattern, project, environment string) error {
+	if ok, err := d.EnvironmentExists(project, environment); err != nil {
+		return fmt.Errorf("validate environment: %w", err)
+	} else if !ok {
+		return ErrInvalidEnvironment
+	}
 	result, err := d.db.Exec(
 		"UPDATE access_policies SET name = ?, repository_pattern = ?, ref_pattern = ?, project = ?, environment = ? WHERE id = ?",
 		name, repoPattern, refPattern, project, environment, id,

@@ -1,0 +1,42 @@
+{{template "head" .}}
+{{define "title"}}Environments - Secret Server{{end}}
+
+<div class="toolbar">
+    <h1>Environments</h1>
+    <a href="{{prefix}}/environments/new" class="btn btn-primary">New Environment</a>
+</div>
+<p class="page-desc">Environments define the project + environment pairs available for secrets and policies. Create them here first, then reference them elsewhere.</p>
+
+{{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+
+{{if .Environments}}
+<table>
+    <thead>
+        <tr>
+            <th>Project</th>
+            <th>Environment</th>
+            <th>Created</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{range .Environments}}
+        <tr>
+            <td>{{.Project}}</td>
+            <td>{{.Environment}}</td>
+            <td>{{.CreatedAt.Format "2006-01-02 15:04"}}</td>
+            <td>
+                <form class="inline" method="post" action="{{prefix}}/environments/{{.ID}}/delete" onsubmit="return confirm('Delete this environment? This will fail if secrets or policies still reference it.')">
+                    {{with csrfToken}}<input type="hidden" name="csrf_token" value="{{.}}">{{end}}
+                    <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                </form>
+            </td>
+        </tr>
+        {{end}}
+    </tbody>
+</table>
+{{else}}
+<p class="empty">No environments defined yet. <a href="{{prefix}}/environments/new">Create one</a> to get started.</p>
+{{end}}
+
+{{template "foot" .}}

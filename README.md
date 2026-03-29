@@ -7,8 +7,8 @@ Self-hosted secrets manager for homelab use. Single Go binary with SQLite storag
 | Zone | Routes | Auth | Access |
 |------|--------|------|--------|
 | GitHub API | `POST /github/v1/secrets` | GitHub Actions OIDC JWT | Read-only — vend secrets matching policies |
-| Admin API | `/admin/v1/*` | Cloudflare Access JWT | Create, update, delete secrets and policies |
-| Admin UI | `/admin/*` | Cloudflare Access JWT | Web UI for managing secrets and policies |
+| Admin API | `/admin/v1/*` | Cloudflare Access JWT | Create, update, delete secrets, policies, and environments |
+| Admin UI | `/admin/*` | Cloudflare Access JWT | Web UI for managing secrets, policies, and environments |
 
 Two path prefixes for Cloudflare Access: protect `/admin/*`, bypass `/github/*`. The GitHub API validates OIDC tokens directly. Admin routes are protected by Cloudflare Access (the server validates CF JWTs as defense-in-depth). The root path `/` redirects to the admin UI. `GET /health` is available for Docker/uptime checks (not routed through CF Access).
 
@@ -82,8 +82,15 @@ All state-changing operations are recorded in a separate SQLite database (`audit
 - **Secret access** — which GitHub Actions repository/ref/workflow fetched secrets, and which policies matched
 - **Secret management** — create, update, delete operations by admin users
 - **Policy management** — create, update, delete operations by admin users
+- **Environment management** — create, delete operations by admin users
 
 The audit log is isolated from the secrets database to prevent corruption of credential data during hardware or power failures. View the audit log at `/ui/audit`.
+
+## Environments
+
+Environments are managed project/environment pairs (e.g. `myapp`/`prod`, `myapp`/`staging`). They must be created on the Environments page before they can be used. Secrets and policies reference environments via dropdown — no free-text entry. This prevents typos and ensures consistency.
+
+On upgrade, existing project/environment pairs from secrets and policies are automatically seeded into the environments table.
 
 ## Access Policies
 
@@ -91,7 +98,7 @@ Policies control which GitHub Actions workflows can access which secrets. Each p
 
 - **Repository pattern** — glob pattern matching repository names (e.g. `myorg/*`, `myorg/myrepo`)
 - **Ref pattern** — glob pattern matching git refs (e.g. `refs/heads/main`, `*`)
-- **Project + Environment** — which secrets the policy grants access to
+- **Project + Environment** — which secrets the policy grants access to (selected from managed environments)
 
 When a GitHub Actions workflow requests secrets, the server:
 1. Validates the OIDC token
