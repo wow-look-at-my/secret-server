@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"runtime/debug"
 
 	"github.com/go-chi/chi/v5"
 	gorillacsrf "github.com/gorilla/csrf"
@@ -57,8 +58,35 @@ func main() {
 	}
 }
 
+func buildVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	var revision string
+	var modified bool
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			revision = s.Value
+		case "vcs.modified":
+			modified = s.Value == "true"
+		}
+	}
+	if revision == "" {
+		return ""
+	}
+	if len(revision) > 7 {
+		revision = revision[:7]
+	}
+	if modified {
+		revision += "-dirty"
+	}
+	return revision
+}
+
 func buildMux(db *database.DB, auditDB *database.AuditDB, cfg *config.Config) (chi.Router, error) {
-	tmpl, err := templates.New(handlers.AdminPrefix)
+	tmpl, err := templates.New(handlers.AdminPrefix, buildVersion())
 	if err != nil {
 		return nil, err
 	}

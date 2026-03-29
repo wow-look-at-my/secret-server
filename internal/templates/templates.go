@@ -16,9 +16,10 @@ type Templates struct {
 	tmpl *template.Template
 }
 
-func New(adminPrefix string) (*Templates, error) {
+func New(adminPrefix, version string) (*Templates, error) {
 	funcs := template.FuncMap{
 		"prefix":    func() string { return adminPrefix },
+		"version":   func() string { return version },
 		"csrfToken": func() string { return "" }, // placeholder, overridden per-render
 	}
 	tmpl, err := template.New("").Funcs(funcs).ParseFS(templateFS, "*.html")
