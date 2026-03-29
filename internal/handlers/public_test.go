@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/wow-look-at-my/testify/assert"
 	"github.com/wow-look-at-my/testify/require"
 )
@@ -14,7 +15,7 @@ import (
 func TestPublicFetchSecretsNoToken(t *testing.T) {
 	env := setup(t)
 	h := NewPublicHandler(env.db, env.audit, env.oidc)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	req := httptest.NewRequest("POST", "/github/v1/secrets", nil)
@@ -31,7 +32,7 @@ func TestPublicFetchSecretsWithPolicy(t *testing.T) {
 	env.db.CreatePolicy("allow", "myorg/*", "*", "myapp", "prod")
 
 	h := NewPublicHandler(env.db, env.audit, env.oidc)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	token := makeOIDCToken(t, env.jwk, "myorg/repo", "refs/heads/main")
@@ -62,7 +63,7 @@ func TestPublicFetchSecretsNoMatchingPolicy(t *testing.T) {
 	env.db.CreatePolicy("other", "otherorg/*", "*", "app", "prod")
 
 	h := NewPublicHandler(env.db, env.audit, env.oidc)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	token := makeOIDCToken(t, env.jwk, "myorg/repo", "refs/heads/main")
@@ -79,7 +80,7 @@ func TestPublicFetchSecretsNoMatchingPolicy(t *testing.T) {
 func TestPublicFetchSecretsInvalidToken(t *testing.T) {
 	env := setup(t)
 	h := NewPublicHandler(env.db, env.audit, env.oidc)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	req := httptest.NewRequest("POST", "/github/v1/secrets", nil)
@@ -100,7 +101,7 @@ func TestPublicFetchSecretsMultiplePoliciesSameProjectEnv(t *testing.T) {
 	env.db.CreatePolicy("p2", "myorg/*", "refs/heads/*", "app", "prod")
 
 	h := NewPublicHandler(env.db, env.audit, env.oidc)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	token := makeOIDCToken(t, env.jwk, "myorg/repo", "refs/heads/main")
@@ -126,7 +127,7 @@ func TestPublicFetchSecretsMultipleProjectEnvs(t *testing.T) {
 	env.db.CreatePolicy("p2", "myorg/*", "*", "app", "staging")
 
 	h := NewPublicHandler(env.db, env.audit, env.oidc)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	token := makeOIDCToken(t, env.jwk, "myorg/repo", "refs/heads/main")

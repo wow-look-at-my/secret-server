@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/wow-look-at-my/testify/assert"
 	"github.com/wow-look-at-my/testify/require"
 )
@@ -16,7 +17,7 @@ func TestUIPages(t *testing.T) {
 	env.db.CreatePolicy("p", "org/*", "*", "app", "prod")
 
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	pages := []struct {
@@ -43,7 +44,7 @@ func TestUIPages(t *testing.T) {
 func TestUISecretCreateEditDelete(t *testing.T) {
 	env := setup(t)
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	form := "key=MY_KEY&value=my_secret&project=testproj&environment=staging"
@@ -84,7 +85,7 @@ func TestUISecretCreateEditDelete(t *testing.T) {
 func TestUIPolicyCreateEditDelete(t *testing.T) {
 	env := setup(t)
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	form := "name=Test+Policy&repository_pattern=org/*&ref_pattern=*&project=app&environment=prod"
@@ -126,7 +127,7 @@ func TestUIPolicyCreateEditDelete(t *testing.T) {
 func TestUIEditSecretNotFound(t *testing.T) {
 	env := setup(t)
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	req := httptest.NewRequest("GET", "/admin/secrets/nonexistent/edit", nil)
@@ -138,7 +139,7 @@ func TestUIEditSecretNotFound(t *testing.T) {
 func TestUIUpdateNonexistentSecret(t *testing.T) {
 	env := setup(t)
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	form := "key=K&value=v&project=app&environment=prod"
@@ -152,7 +153,7 @@ func TestUIUpdateNonexistentSecret(t *testing.T) {
 func TestUIDeleteNonexistentSecret(t *testing.T) {
 	env := setup(t)
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	req := httptest.NewRequest("POST", "/admin/secrets/nonexistent/delete", nil)
@@ -164,7 +165,7 @@ func TestUIDeleteNonexistentSecret(t *testing.T) {
 func TestUIUpdateNonexistentPolicy(t *testing.T) {
 	env := setup(t)
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	form := "name=P&repository_pattern=org/*&ref_pattern=*&project=app&environment=prod"
@@ -178,7 +179,7 @@ func TestUIUpdateNonexistentPolicy(t *testing.T) {
 func TestUIDeleteNonexistentPolicy(t *testing.T) {
 	env := setup(t)
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	req := httptest.NewRequest("POST", "/admin/policies/nonexistent/delete", nil)
@@ -190,7 +191,7 @@ func TestUIDeleteNonexistentPolicy(t *testing.T) {
 func TestUIEditPolicyNotFound(t *testing.T) {
 	env := setup(t)
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	req := httptest.NewRequest("GET", "/admin/policies/nonexistent/edit", nil)
@@ -202,7 +203,7 @@ func TestUIEditPolicyNotFound(t *testing.T) {
 func TestUIPolicyCreateDefaultRefPattern(t *testing.T) {
 	env := setup(t)
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	form := "name=NoRef&repository_pattern=org/*&project=app&environment=prod"
@@ -220,7 +221,7 @@ func TestUIPolicyCreateDefaultRefPattern(t *testing.T) {
 func TestUIDashboardRedirectBadPath(t *testing.T) {
 	env := setup(t)
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	req := httptest.NewRequest("GET", "/admin/something-else", nil)
@@ -235,7 +236,7 @@ func TestUISecretCreateDuplicate(t *testing.T) {
 	env.db.CreateSecret("DUP_KEY", "val", "proj", "env")
 
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	form := "key=DUP_KEY&value=val2&project=proj&environment=env"
@@ -252,7 +253,7 @@ func TestUIListSecretsWithEnvFilter(t *testing.T) {
 	env.db.CreateSecret("K2", "v2", "proj", "dev")
 
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	req := httptest.NewRequest("GET", "/admin/secrets?project=proj&environment=prod", nil)
@@ -267,7 +268,7 @@ func TestUIUpdatePolicyViaForm(t *testing.T) {
 	p, _ := env.db.CreatePolicy("test", "org/*", "*", "app", "prod")
 
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	form := "name=Updated&repository_pattern=org/*&ref_pattern=refs/heads/main&project=app&environment=staging"
@@ -287,7 +288,7 @@ func TestUIUpdatePolicyDefaultRefPattern(t *testing.T) {
 	p, _ := env.db.CreatePolicy("test", "org/*", "refs/heads/main", "app", "prod")
 
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	form := "name=Updated&repository_pattern=org/*&project=app&environment=prod"
@@ -306,7 +307,7 @@ func TestUIDeleteSecretViaForm(t *testing.T) {
 	s, _ := env.db.CreateSecret("DEL", "val", "app", "prod")
 
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	req := httptest.NewRequest("POST", "/admin/secrets/"+s.ID+"/delete", nil)
@@ -323,7 +324,7 @@ func TestUIDeletePolicyViaForm(t *testing.T) {
 	p, _ := env.db.CreatePolicy("del", "org/*", "*", "app", "prod")
 
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	req := httptest.NewRequest("POST", "/admin/policies/"+p.ID+"/delete", nil)
@@ -340,7 +341,7 @@ func TestUIUpdateSecretViaForm(t *testing.T) {
 	s, _ := env.db.CreateSecret("UPD", "old", "app", "prod")
 
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	form := "key=UPD&value=new_val&project=app&environment=prod"
@@ -359,7 +360,7 @@ func TestUIUpdateSecretEmptyValuePreservesExisting(t *testing.T) {
 	s, _ := env.db.CreateSecret("KEEP", "original_secret", "app", "prod")
 
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	form := "key=KEEP&value=&project=app&environment=prod"
@@ -378,7 +379,7 @@ func TestUIUpdateSecretEmptyValuePreservesExisting(t *testing.T) {
 func TestUICreateSecretDBError(t *testing.T) {
 	env := setupClosedDB(t)
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	form := "key=K&value=v&project=app&environment=prod"
@@ -392,7 +393,7 @@ func TestUICreateSecretDBError(t *testing.T) {
 func TestUIUpdateSecretDBError(t *testing.T) {
 	env := setupClosedDB(t)
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	form := "key=K&value=v&project=app&environment=prod"
@@ -406,7 +407,7 @@ func TestUIUpdateSecretDBError(t *testing.T) {
 func TestUICreatePolicyDBError(t *testing.T) {
 	env := setupClosedDB(t)
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	form := "name=P&repository_pattern=org/*&ref_pattern=*&project=app&environment=prod"
@@ -420,7 +421,7 @@ func TestUICreatePolicyDBError(t *testing.T) {
 func TestUIUpdatePolicyDBError(t *testing.T) {
 	env := setupClosedDB(t)
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	form := "name=P&repository_pattern=org/*&ref_pattern=*&project=app&environment=prod"
@@ -434,7 +435,7 @@ func TestUIUpdatePolicyDBError(t *testing.T) {
 func TestUIListSecretsDBError(t *testing.T) {
 	env := setupClosedDB(t)
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	req := httptest.NewRequest("GET", "/admin/secrets", nil)
@@ -446,7 +447,7 @@ func TestUIListSecretsDBError(t *testing.T) {
 func TestUIListPoliciesDBError(t *testing.T) {
 	env := setupClosedDB(t)
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	req := httptest.NewRequest("GET", "/admin/policies", nil)
@@ -458,7 +459,7 @@ func TestUIListPoliciesDBError(t *testing.T) {
 func TestUIDashboardDBError(t *testing.T) {
 	env := setupClosedDB(t)
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	req := httptest.NewRequest("GET", "/admin/", nil)
@@ -470,7 +471,7 @@ func TestUIDashboardDBError(t *testing.T) {
 func TestUIEditSecretDBError(t *testing.T) {
 	env := setupClosedDB(t)
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	req := httptest.NewRequest("GET", "/admin/secrets/some-id/edit", nil)
@@ -482,7 +483,7 @@ func TestUIEditSecretDBError(t *testing.T) {
 func TestUIEditPolicyDBError(t *testing.T) {
 	env := setupClosedDB(t)
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	req := httptest.NewRequest("GET", "/admin/policies/some-id/edit", nil)
@@ -494,7 +495,7 @@ func TestUIEditPolicyDBError(t *testing.T) {
 func TestUIDeleteSecretDBError(t *testing.T) {
 	env := setupClosedDB(t)
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	req := httptest.NewRequest("POST", "/admin/secrets/some-id/delete", nil)
@@ -506,7 +507,7 @@ func TestUIDeleteSecretDBError(t *testing.T) {
 func TestUIDeletePolicyDBError(t *testing.T) {
 	env := setupClosedDB(t)
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	req := httptest.NewRequest("POST", "/admin/policies/some-id/delete", nil)
@@ -520,7 +521,7 @@ func TestUIAuditLogPage(t *testing.T) {
 	env.audit.CreateEntry("secret.create", "admin", "user@test.com", "secret", "abc123", `{"key":"API_KEY"}`)
 
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	req := httptest.NewRequest("GET", "/admin/audit", nil)
@@ -534,7 +535,7 @@ func TestUIAuditLogPage(t *testing.T) {
 func TestUIAuditLogPageEmpty(t *testing.T) {
 	env := setup(t)
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	req := httptest.NewRequest("GET", "/admin/audit", nil)
@@ -547,7 +548,7 @@ func TestUIAuditLogPageEmpty(t *testing.T) {
 func TestUIAuditLogDBError(t *testing.T) {
 	env := setupClosedDB(t)
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	req := httptest.NewRequest("GET", "/admin/audit", nil)

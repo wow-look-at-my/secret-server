@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/wow-look-at-my/secret-server/internal/auth"
 	"github.com/wow-look-at-my/secret-server/internal/database"
 )
@@ -20,8 +21,8 @@ func NewPublicHandler(db *database.DB, audit *database.AuditDB, oidc *auth.GitHu
 	return &PublicHandler{db: db, audit: audit, oidc: oidc}
 }
 
-func (h *PublicHandler) Register(mux *http.ServeMux) {
-	mux.HandleFunc("POST "+GitHubPrefix+"/secrets", h.fetchSecrets)
+func (h *PublicHandler) Register(r chi.Router) {
+	r.Post(GitHubPrefix+"/secrets", h.fetchSecrets)
 }
 
 func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
