@@ -62,9 +62,9 @@ func Protect(next http.Handler) http.Handler {
 					Name:     cookieName,
 					Value:    token,
 					Path:     "/",
-					HttpOnly: false, // JS needs to read it for AJAX if needed
+					HttpOnly: true,
 					SameSite: http.SameSiteStrictMode,
-					Secure:   r.TLS != nil,
+					Secure:   r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https",
 				})
 			}
 			ctx := context.WithValue(r.Context(), contextKey{}, token)
