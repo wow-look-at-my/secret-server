@@ -21,7 +21,7 @@ All configuration is via environment variables:
 | `ENCRYPTION_KEY` | Yes | — | 32-byte hex-encoded AES-256 key (64 hex chars) |
 | `CF_ACCESS_TEAM_DOMAIN` | Yes | — | Cloudflare Access team domain (e.g. `myteam`) |
 | `CF_ACCESS_ADMIN_AUDIENCE` | Yes | — | Cloudflare Access application audience tag |
-| `OIDC_AUDIENCE` | No | — | Expected audience for GitHub OIDC tokens |
+| `OIDC_AUDIENCE` | Yes | — | Expected audience for GitHub OIDC tokens |
 | `LISTEN_ADDR` | No | `:8080` | Server listen address |
 | `DATABASE_PATH` | No | `./secrets.db` | Path to SQLite database file |
 | `AUDIT_DATABASE_PATH` | No | `./audit.db` | Path to audit log SQLite database (separate from secrets DB) |
