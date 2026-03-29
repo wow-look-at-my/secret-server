@@ -8,7 +8,7 @@ import (
 )
 
 func TestNewTemplates(t *testing.T) {
-	tmpl, err := New("/admin")
+	tmpl, err := New("/admin", "test")
 	require.Nil(t, err)
 
 	require.NotNil(t, tmpl)
@@ -16,7 +16,7 @@ func TestNewTemplates(t *testing.T) {
 }
 
 func TestRenderDashboard(t *testing.T) {
-	tmpl, err := New("/admin")
+	tmpl, err := New("/admin", "test")
 	require.Nil(t, err)
 
 	rr := httptest.NewRecorder()
@@ -43,7 +43,7 @@ func TestRenderDashboard(t *testing.T) {
 }
 
 func TestRenderSecretsList(t *testing.T) {
-	tmpl, _ := New("/admin")
+	tmpl, _ := New("/admin", "test")
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/admin/secrets", nil)
 	tmpl.Render(rr, req, "secrets_list.html", map[string]any{
@@ -56,7 +56,7 @@ func TestRenderSecretsList(t *testing.T) {
 }
 
 func TestRenderSecretForm(t *testing.T) {
-	tmpl, _ := New("/admin")
+	tmpl, _ := New("/admin", "test")
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/admin/secrets/new", nil)
 	tmpl.Render(rr, req, "secret_form.html", map[string]any{
@@ -67,7 +67,7 @@ func TestRenderSecretForm(t *testing.T) {
 }
 
 func TestRenderPoliciesList(t *testing.T) {
-	tmpl, _ := New("/admin")
+	tmpl, _ := New("/admin", "test")
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/admin/policies", nil)
 	tmpl.Render(rr, req, "policies_list.html", []any{})
@@ -76,7 +76,7 @@ func TestRenderPoliciesList(t *testing.T) {
 }
 
 func TestRenderPolicyForm(t *testing.T) {
-	tmpl, _ := New("/admin")
+	tmpl, _ := New("/admin", "test")
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/admin/policies/new", nil)
 	tmpl.Render(rr, req, "policy_form.html", map[string]any{
