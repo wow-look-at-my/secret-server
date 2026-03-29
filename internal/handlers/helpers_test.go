@@ -51,7 +51,7 @@ func setup(t *testing.T) *testEnv {
 
 	t.Cleanup(func() { db.Close(); auditDB.Close() })
 
-	tmpl, err := templates.New(AdminPrefix)
+	tmpl, err := templates.New(AdminPrefix, "test")
 	require.Nil(t, err)
 
 	rsaKey, _ := rsa.GenerateKey(rand.Reader, 2048)
