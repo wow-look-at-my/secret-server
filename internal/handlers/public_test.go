@@ -119,7 +119,7 @@ func TestPublicFetchSecretsInvalidToken(t *testing.T) {
 func TestPublicFetchSecretsPolicyDBError(t *testing.T) {
 	env := setupClosedMainDB(t)
 	h := NewPublicHandler(env.db, env.audit, env.oidc)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	token := makeOIDCToken(t, env.jwk, "myorg/repo", "refs/heads/main")
