@@ -1,11 +1,13 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	sqlcdb "github.com/wow-look-at-my/secret-server/internal/database/sqlc"
 )
 
 type Policy struct {
@@ -26,10 +28,15 @@ func (d *DB) CreatePolicy(name, repoPattern, refPattern, project, environment st
 	}
 	id := uuid.New().String()
 	now := time.Now().UTC()
-	_, err := d.db.Exec(
-		"INSERT INTO access_policies (id, name, repository_pattern, ref_pattern, project, environment, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		id, name, repoPattern, refPattern, project, environment, now,
-	)
+	err := d.q.CreatePolicy(context.Background(), sqlcdb.CreatePolicyParams{
+		ID:                id,
+		Name:              name,
+		RepositoryPattern: repoPattern,
+		RefPattern:        refPattern,
+		Project:           project,
+		Environment:       environment,
+		CreatedAt:         now,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("insert policy: %w", err)
 	}
@@ -40,37 +47,42 @@ func (d *DB) CreatePolicy(name, repoPattern, refPattern, project, environment st
 }
 
 func (d *DB) GetPolicy(id string) (*Policy, error) {
-	var p Policy
-	err := d.db.QueryRow(
-		"SELECT id, name, repository_pattern, ref_pattern, project, environment, created_at FROM access_policies WHERE id = ?", id,
-	).Scan(&p.ID, &p.Name, &p.RepositoryPattern, &p.RefPattern, &p.Project, &p.Environment, &p.CreatedAt)
+	row, err := d.q.GetPolicy(context.Background(), id)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("query policy: %w", err)
 	}
-	return &p, nil
+	return &Policy{
+		ID:                row.ID,
+		Name:              row.Name,
+		RepositoryPattern: row.RepositoryPattern,
+		RefPattern:        row.RefPattern,
+		Project:           row.Project,
+		Environment:       row.Environment,
+		CreatedAt:         row.CreatedAt,
+	}, nil
 }
 
 func (d *DB) ListPolicies() ([]Policy, error) {
-	rows, err := d.db.Query(
-		"SELECT id, name, repository_pattern, ref_pattern, project, environment, created_at FROM access_policies ORDER BY name",
-	)
+	rows, err := d.q.ListPolicies(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("query policies: %w", err)
 	}
-	defer rows.Close()
-
-	var policies []Policy
-	for rows.Next() {
-		var p Policy
-		if err := rows.Scan(&p.ID, &p.Name, &p.RepositoryPattern, &p.RefPattern, &p.Project, &p.Environment, &p.CreatedAt); err != nil {
-			return nil, fmt.Errorf("scan policy: %w", err)
+	policies := make([]Policy, len(rows))
+	for i, r := range rows {
+		policies[i] = Policy{
+			ID:                r.ID,
+			Name:              r.Name,
+			RepositoryPattern: r.RepositoryPattern,
+			RefPattern:        r.RefPattern,
+			Project:           r.Project,
+			Environment:       r.Environment,
+			CreatedAt:         r.CreatedAt,
 		}
-		policies = append(policies, p)
 	}
-	return policies, rows.Err()
+	return policies, nil
 }
 
 func (d *DB) UpdatePolicy(id, name, repoPattern, refPattern, project, environment string) error {
@@ -79,10 +91,14 @@ func (d *DB) UpdatePolicy(id, name, repoPattern, refPattern, project, environmen
 	} else if !ok {
 		return ErrInvalidEnvironment
 	}
-	result, err := d.db.Exec(
-		"UPDATE access_policies SET name = ?, repository_pattern = ?, ref_pattern = ?, project = ?, environment = ? WHERE id = ?",
-		name, repoPattern, refPattern, project, environment, id,
-	)
+	result, err := d.q.UpdatePolicy(context.Background(), sqlcdb.UpdatePolicyParams{
+		Name:              name,
+		RepositoryPattern: repoPattern,
+		RefPattern:        refPattern,
+		Project:           project,
+		Environment:       environment,
+		ID:                id,
+	})
 	if err != nil {
 		return err
 	}
@@ -97,7 +113,7 @@ func (d *DB) UpdatePolicy(id, name, repoPattern, refPattern, project, environmen
 }
 
 func (d *DB) DeletePolicy(id string) error {
-	result, err := d.db.Exec("DELETE FROM access_policies WHERE id = ?", id)
+	result, err := d.q.DeletePolicy(context.Background(), id)
 	if err != nil {
 		return err
 	}

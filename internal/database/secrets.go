@@ -1,12 +1,14 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"encoding/base64"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	sqlcdb "github.com/wow-look-at-my/secret-server/internal/database/sqlc"
 )
 
 type Secret struct {
@@ -19,6 +21,27 @@ type Secret struct {
 	UpdatedAt   time.Time
 }
 
+func (d *DB) encryptValue(plaintext string) ([]byte, error) {
+	encrypted, err := d.encryptor.Encrypt([]byte(plaintext))
+	if err != nil {
+		return nil, fmt.Errorf("encrypt value: %w", err)
+	}
+	encB64 := base64.StdEncoding.EncodeToString(encrypted)
+	return []byte(encB64), nil
+}
+
+func (d *DB) decryptValue(enc []byte) (string, error) {
+	encrypted, err := base64.StdEncoding.DecodeString(string(enc))
+	if err != nil {
+		return "", fmt.Errorf("decode secret value: %w", err)
+	}
+	plaintext, err := d.encryptor.Decrypt(encrypted)
+	if err != nil {
+		return "", fmt.Errorf("decrypt secret: %w", err)
+	}
+	return string(plaintext), nil
+}
+
 func (d *DB) CreateSecret(key, value, project, environment string) (*Secret, error) {
 	if ok, err := d.EnvironmentExists(project, environment); err != nil {
 		return nil, fmt.Errorf("validate environment: %w", err)
@@ -26,16 +49,20 @@ func (d *DB) CreateSecret(key, value, project, environment string) (*Secret, err
 		return nil, ErrInvalidEnvironment
 	}
 	id := uuid.New().String()
-	encrypted, err := d.encryptor.Encrypt([]byte(value))
+	enc, err := d.encryptValue(value)
 	if err != nil {
-		return nil, fmt.Errorf("encrypt value: %w", err)
+		return nil, err
 	}
-	encB64 := base64.StdEncoding.EncodeToString(encrypted)
 	now := time.Now().UTC()
-	_, err = d.db.Exec(
-		"INSERT INTO secrets (id, key, value, project, environment, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		id, key, encB64, project, environment, now, now,
-	)
+	err = d.q.CreateSecret(context.Background(), sqlcdb.CreateSecretParams{
+		ID:          id,
+		Key:         key,
+		Value:       enc,
+		Project:     project,
+		Environment: environment,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("insert secret: %w", err)
 	}
@@ -43,27 +70,26 @@ func (d *DB) CreateSecret(key, value, project, environment string) (*Secret, err
 }
 
 func (d *DB) GetSecret(id string) (*Secret, error) {
-	var s Secret
-	var encB64 string
-	err := d.db.QueryRow(
-		"SELECT id, key, value, project, environment, created_at, updated_at FROM secrets WHERE id = ?", id,
-	).Scan(&s.ID, &s.Key, &encB64, &s.Project, &s.Environment, &s.CreatedAt, &s.UpdatedAt)
+	row, err := d.q.GetSecret(context.Background(), id)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("query secret: %w", err)
 	}
-	encrypted, err := base64.StdEncoding.DecodeString(encB64)
+	plaintext, err := d.decryptValue(row.Value)
 	if err != nil {
-		return nil, fmt.Errorf("decode secret value: %w", err)
+		return nil, err
 	}
-	plaintext, err := d.encryptor.Decrypt(encrypted)
-	if err != nil {
-		return nil, fmt.Errorf("decrypt secret: %w", err)
-	}
-	s.Value = string(plaintext)
-	return &s, nil
+	return &Secret{
+		ID:          row.ID,
+		Key:         row.Key,
+		Value:       plaintext,
+		Project:     row.Project,
+		Environment: row.Environment,
+		CreatedAt:   row.CreatedAt,
+		UpdatedAt:   row.UpdatedAt,
+	}, nil
 }
 
 type SecretListItem struct {
@@ -76,33 +102,52 @@ type SecretListItem struct {
 }
 
 func (d *DB) ListSecrets(project, environment string) ([]SecretListItem, error) {
-	query := "SELECT id, key, project, environment, created_at, updated_at FROM secrets WHERE 1=1"
-	var args []any
-	if project != "" {
-		query += " AND project = ?"
-		args = append(args, project)
-	}
-	if environment != "" {
-		query += " AND environment = ?"
-		args = append(args, environment)
-	}
-	query += " ORDER BY project, environment, key"
-
-	rows, err := d.db.Query(query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("query secrets: %w", err)
-	}
-	defer rows.Close()
-
-	var secrets []SecretListItem
-	for rows.Next() {
-		var s SecretListItem
-		if err := rows.Scan(&s.ID, &s.Key, &s.Project, &s.Environment, &s.CreatedAt, &s.UpdatedAt); err != nil {
-			return nil, fmt.Errorf("scan secret: %w", err)
+	ctx := context.Background()
+	switch {
+	case project != "" && environment != "":
+		rows, err := d.q.ListSecretsByProjectAndEnv(ctx, sqlcdb.ListSecretsByProjectAndEnvParams{
+			Project:     project,
+			Environment: environment,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("query secrets: %w", err)
 		}
-		secrets = append(secrets, s)
+		secrets := make([]SecretListItem, len(rows))
+		for i, r := range rows {
+			secrets[i] = SecretListItem{ID: r.ID, Key: r.Key, Project: r.Project, Environment: r.Environment, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+		}
+		return secrets, nil
+	case project != "":
+		rows, err := d.q.ListSecretsByProject(ctx, project)
+		if err != nil {
+			return nil, fmt.Errorf("query secrets: %w", err)
+		}
+		secrets := make([]SecretListItem, len(rows))
+		for i, r := range rows {
+			secrets[i] = SecretListItem{ID: r.ID, Key: r.Key, Project: r.Project, Environment: r.Environment, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+		}
+		return secrets, nil
+	case environment != "":
+		rows, err := d.q.ListSecretsByEnv(ctx, environment)
+		if err != nil {
+			return nil, fmt.Errorf("query secrets: %w", err)
+		}
+		secrets := make([]SecretListItem, len(rows))
+		for i, r := range rows {
+			secrets[i] = SecretListItem{ID: r.ID, Key: r.Key, Project: r.Project, Environment: r.Environment, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+		}
+		return secrets, nil
+	default:
+		rows, err := d.q.ListSecretsAll(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("query secrets: %w", err)
+		}
+		secrets := make([]SecretListItem, len(rows))
+		for i, r := range rows {
+			secrets[i] = SecretListItem{ID: r.ID, Key: r.Key, Project: r.Project, Environment: r.Environment, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+		}
+		return secrets, nil
 	}
-	return secrets, rows.Err()
 }
 
 func (d *DB) UpdateSecret(id, key, value, project, environment string) error {
@@ -111,15 +156,18 @@ func (d *DB) UpdateSecret(id, key, value, project, environment string) error {
 	} else if !ok {
 		return ErrInvalidEnvironment
 	}
-	encrypted, err := d.encryptor.Encrypt([]byte(value))
+	enc, err := d.encryptValue(value)
 	if err != nil {
-		return fmt.Errorf("encrypt value: %w", err)
+		return err
 	}
-	encB64 := base64.StdEncoding.EncodeToString(encrypted)
-	result, err := d.db.Exec(
-		"UPDATE secrets SET key = ?, value = ?, project = ?, environment = ?, updated_at = ? WHERE id = ?",
-		key, encB64, project, environment, time.Now().UTC(), id,
-	)
+	result, err := d.q.UpdateSecret(context.Background(), sqlcdb.UpdateSecretParams{
+		Key:         key,
+		Value:       enc,
+		Project:     project,
+		Environment: environment,
+		UpdatedAt:   time.Now().UTC(),
+		ID:          id,
+	})
 	if err != nil {
 		return err
 	}
@@ -134,7 +182,7 @@ func (d *DB) UpdateSecret(id, key, value, project, environment string) error {
 }
 
 func (d *DB) DeleteSecret(id string) error {
-	result, err := d.db.Exec("DELETE FROM secrets WHERE id = ?", id)
+	result, err := d.q.DeleteSecret(context.Background(), id)
 	if err != nil {
 		return err
 	}
@@ -150,32 +198,22 @@ func (d *DB) DeleteSecret(id string) error {
 
 // GetSecretsByProjectEnv returns decrypted secrets for a given project+environment.
 func (d *DB) GetSecretsByProjectEnv(project, environment string) (map[string]string, error) {
-	rows, err := d.db.Query(
-		"SELECT key, value FROM secrets WHERE project = ? AND environment = ?",
-		project, environment,
-	)
+	rows, err := d.q.GetSecretsByProjectEnv(context.Background(), sqlcdb.GetSecretsByProjectEnvParams{
+		Project:     project,
+		Environment: environment,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("query secrets: %w", err)
 	}
-	defer rows.Close()
-
-	result := make(map[string]string)
-	for rows.Next() {
-		var key, encB64 string
-		if err := rows.Scan(&key, &encB64); err != nil {
-			return nil, fmt.Errorf("scan secret: %w", err)
-		}
-		encrypted, err := base64.StdEncoding.DecodeString(encB64)
+	result := make(map[string]string, len(rows))
+	for _, r := range rows {
+		plaintext, err := d.decryptValue(r.Value)
 		if err != nil {
-			return nil, fmt.Errorf("decode secret value: %w", err)
+			return nil, err
 		}
-		plaintext, err := d.encryptor.Decrypt(encrypted)
-		if err != nil {
-			return nil, fmt.Errorf("decrypt secret: %w", err)
-		}
-		result[key] = string(plaintext)
+		result[r.Key] = plaintext
 	}
-	return result, rows.Err()
+	return result, nil
 }
 
 // DashboardStats returns counts for the dashboard.
@@ -187,38 +225,44 @@ type DashboardStats struct {
 }
 
 type ProjectStats struct {
-	Project      string
-	Environment  string
-	SecretCount  int
+	Project     string
+	Environment string
+	SecretCount int
 }
 
 func (d *DB) GetDashboardStats() (*DashboardStats, error) {
+	ctx := context.Background()
 	var stats DashboardStats
 
-	err := d.db.QueryRow("SELECT COUNT(*) FROM secrets").Scan(&stats.TotalSecrets)
+	secretCount, err := d.q.CountSecrets(ctx)
 	if err != nil {
 		return nil, err
 	}
-	err = d.db.QueryRow("SELECT COUNT(*) FROM access_policies").Scan(&stats.TotalPolicies)
-	if err != nil {
-		return nil, err
-	}
-	err = d.db.QueryRow("SELECT COUNT(*) FROM environments").Scan(&stats.TotalEnvironments)
-	if err != nil {
-		return nil, err
-	}
+	stats.TotalSecrets = int(secretCount)
 
-	rows, err := d.db.Query("SELECT project, environment, COUNT(*) FROM secrets GROUP BY project, environment ORDER BY project, environment")
+	policyCount, err := d.q.CountPolicies(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var ps ProjectStats
-		if err := rows.Scan(&ps.Project, &ps.Environment, &ps.SecretCount); err != nil {
-			return nil, err
-		}
-		stats.Projects = append(stats.Projects, ps)
+	stats.TotalPolicies = int(policyCount)
+
+	envCount, err := d.q.CountEnvironments(ctx)
+	if err != nil {
+		return nil, err
 	}
-	return &stats, rows.Err()
+	stats.TotalEnvironments = int(envCount)
+
+	rows, err := d.q.SecretCountsByProjectEnv(ctx)
+	if err != nil {
+		return nil, err
+	}
+	stats.Projects = make([]ProjectStats, len(rows))
+	for i, r := range rows {
+		stats.Projects[i] = ProjectStats{
+			Project:     r.Project,
+			Environment: r.Environment,
+			SecretCount: int(r.SecretCount),
+		}
+	}
+	return &stats, nil
 }

@@ -1,12 +1,14 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/wow-look-at-my/secret-server/internal/crypto"
+	"github.com/wow-look-at-my/secret-server/internal/database/sqlc"
 
 	_ "modernc.org/sqlite"
 )
@@ -20,6 +22,7 @@ var ErrInvalidEnvironment = errors.New("unknown project/environment: create it o
 
 type DB struct {
 	db        *sql.DB
+	q         *sqlcdb.Queries
 	encryptor *crypto.Encryptor
 }
 
@@ -31,7 +34,7 @@ func New(dbPath string, encryptor *crypto.Encryptor) (*DB, error) {
 	if err := db.Ping(); err != nil {
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
-	d := &DB{db: db, encryptor: encryptor}
+	d := &DB{db: db, q: sqlcdb.New(db), encryptor: encryptor}
 	if err := d.migrate(); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
@@ -85,28 +88,20 @@ func (d *DB) migrate() error {
 }
 
 func (d *DB) seedEnvironments() error {
-	rows, err := d.db.Query(`
-		SELECT DISTINCT project, environment FROM secrets
-		UNION
-		SELECT DISTINCT project, environment FROM access_policies
-	`)
+	ctx := context.Background()
+	pairs, err := d.q.SeedEnvironmentPairs(ctx)
 	if err != nil {
 		return fmt.Errorf("query existing project/env pairs: %w", err)
 	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var project, environment string
-		if err := rows.Scan(&project, &environment); err != nil {
-			return fmt.Errorf("scan project/env pair: %w", err)
-		}
-		_, err := d.db.Exec(
-			"INSERT OR IGNORE INTO environments (id, project, environment) VALUES (?, ?, ?)",
-			uuid.New().String(), project, environment,
-		)
+	for _, p := range pairs {
+		err := d.q.InsertEnvironmentIgnore(ctx, sqlcdb.InsertEnvironmentIgnoreParams{
+			ID:          uuid.New().String(),
+			Project:     p.Project,
+			Environment: p.Environment,
+		})
 		if err != nil {
-			return fmt.Errorf("seed environment %s/%s: %w", project, environment, err)
+			return fmt.Errorf("seed environment %s/%s: %w", p.Project, p.Environment, err)
 		}
 	}
-	return rows.Err()
+	return nil
 }
