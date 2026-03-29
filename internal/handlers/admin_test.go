@@ -232,6 +232,143 @@ func TestAdminDeleteNonexistentPolicy(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, rr.Code)
 }
 
+func TestAdminEnvironmentCRUD(t *testing.T) {
+	env := setup(t)
+	h := NewAdminHandler(env.db, env.audit)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	// List environments (pre-seeded by setup)
+	req := httptest.NewRequest("GET", "/admin/v1/environments", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	// Create new environment
+	body := `{"project":"newapp","environment":"staging"}`
+	req = httptest.NewRequest("POST", "/admin/v1/environments", strings.NewReader(body))
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusCreated, rr.Code)
+
+	var created map[string]string
+	json.Unmarshal(rr.Body.Bytes(), &created)
+	id := created["id"]
+	require.NotEmpty(t, id)
+
+	// Delete it (not in use)
+	req = httptest.NewRequest("DELETE", "/admin/v1/environments/"+id, nil)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusNoContent, rr.Code)
+}
+
+func TestAdminCreateEnvironmentMissingFields(t *testing.T) {
+	env := setup(t)
+	h := NewAdminHandler(env.db, env.audit)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	body := `{"project":"app"}`
+	req := httptest.NewRequest("POST", "/admin/v1/environments", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestAdminDeleteEnvironmentInUse(t *testing.T) {
+	env := setup(t)
+	env.db.CreateSecret("KEY", "val", "app", "prod")
+
+	h := NewAdminHandler(env.db, env.audit)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	envID := env.envID(t, "app", "prod")
+	req := httptest.NewRequest("DELETE", "/admin/v1/environments/"+envID, nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusConflict, rr.Code)
+}
+
+func TestAdminDeleteEnvironmentNotFound(t *testing.T) {
+	env := setup(t)
+	h := NewAdminHandler(env.db, env.audit)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	req := httptest.NewRequest("DELETE", "/admin/v1/environments/nonexistent", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+func TestAdminCreateSecretInvalidEnvironment(t *testing.T) {
+	env := setup(t)
+	h := NewAdminHandler(env.db, env.audit)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	body := `{"key":"K","value":"v","project":"nonexistent","environment":"none"}`
+	req := httptest.NewRequest("POST", "/admin/v1/secrets", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestAdminUpdateSecretInvalidEnvironment(t *testing.T) {
+	env := setup(t)
+	s, _ := env.db.CreateSecret("KEY", "val", "app", "prod")
+	h := NewAdminHandler(env.db, env.audit)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	body := `{"key":"KEY","value":"val","project":"nonexistent","environment":"none"}`
+	req := httptest.NewRequest("PUT", "/admin/v1/secrets/"+s.ID, strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestAdminCreatePolicyInvalidEnvironment(t *testing.T) {
+	env := setup(t)
+	h := NewAdminHandler(env.db, env.audit)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	body := `{"name":"test","repository_pattern":"org/*","project":"nonexistent","environment":"none"}`
+	req := httptest.NewRequest("POST", "/admin/v1/policies", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestAdminUpdatePolicyInvalidEnvironment(t *testing.T) {
+	env := setup(t)
+	p, _ := env.db.CreatePolicy("test", "org/*", "*", "app", "prod")
+	h := NewAdminHandler(env.db, env.audit)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	body := `{"name":"test","repository_pattern":"org/*","ref_pattern":"*","project":"nonexistent","environment":"none"}`
+	req := httptest.NewRequest("PUT", "/admin/v1/policies/"+p.ID, strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestAdminEnvironmentInvalidJSON(t *testing.T) {
+	env := setup(t)
+	h := NewAdminHandler(env.db, env.audit)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	req := httptest.NewRequest("POST", "/admin/v1/environments", strings.NewReader("not json"))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
 func TestAdminInvalidJSON(t *testing.T) {
 	env := setup(t)
 	h := NewAdminHandler(env.db, env.audit)
