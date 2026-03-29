@@ -1,6 +1,8 @@
 package database
 
 import (
+	"database/sql"
+	"encoding/base64"
 	"os"
 	"testing"
 
@@ -50,15 +52,6 @@ func TestEnvironmentCRUD(t *testing.T) {
 	require.Nil(t, err)
 	require.Equal(t, 1, len(envs))
 
-	// Exists
-	exists, err := db.EnvironmentExists("myapp", "prod")
-	require.Nil(t, err)
-	assert.True(t, exists)
-
-	exists, err = db.EnvironmentExists("myapp", "staging")
-	require.Nil(t, err)
-	assert.False(t, exists)
-
 	// Duplicate should fail
 	_, err = db.CreateEnvironment("myapp", "prod")
 	require.NotNil(t, err)
@@ -72,60 +65,108 @@ func TestEnvironmentCRUD(t *testing.T) {
 	require.Nil(t, got)
 }
 
+func TestUpdateEnvironment(t *testing.T) {
+	db := testDB(t)
+
+	env, err := db.CreateEnvironment("myapp", "prod")
+	require.Nil(t, err)
+
+	// Create a secret referencing this environment
+	_, err = db.CreateSecret("KEY", "val", env.ID)
+	require.Nil(t, err)
+
+	// Rename the environment
+	err = db.UpdateEnvironment(env.ID, "myapp-renamed", "production")
+	require.Nil(t, err)
+
+	// Verify the environment is renamed
+	got, err := db.GetEnvironment(env.ID)
+	require.Nil(t, err)
+	assert.Equal(t, "myapp-renamed", got.Project)
+	assert.Equal(t, "production", got.Environment)
+
+	// Verify the secret reflects the new name via JOIN
+	secrets, err := db.ListSecrets("myapp-renamed", "production")
+	require.Nil(t, err)
+	require.Equal(t, 1, len(secrets))
+	assert.Equal(t, "KEY", secrets[0].Key)
+	assert.Equal(t, "myapp-renamed", secrets[0].Project)
+	assert.Equal(t, "production", secrets[0].Environment)
+
+	// Old name should return nothing
+	secrets, err = db.ListSecrets("myapp", "prod")
+	require.Nil(t, err)
+	assert.Equal(t, 0, len(secrets))
+}
+
+func TestUpdateEnvironmentDuplicate(t *testing.T) {
+	db := testDB(t)
+
+	_, err := db.CreateEnvironment("app", "prod")
+	require.Nil(t, err)
+	env2, err := db.CreateEnvironment("app", "staging")
+	require.Nil(t, err)
+
+	// Renaming staging to prod should fail (duplicate)
+	err = db.UpdateEnvironment(env2.ID, "app", "prod")
+	require.NotNil(t, err)
+}
+
+func TestUpdateEnvironmentNotFound(t *testing.T) {
+	db := testDB(t)
+	err := db.UpdateEnvironment("nonexistent", "app", "prod")
+	assert.ErrorIs(t, err, ErrNotFound)
+}
+
 func TestEnvironmentInUse(t *testing.T) {
 	db := testDB(t)
 	env, err := db.CreateEnvironment("myapp", "prod")
 	require.Nil(t, err)
 
 	// Not in use initially
-	inUse, err := db.EnvironmentInUse("myapp", "prod")
+	inUse, err := db.EnvironmentInUse(env.ID)
 	require.Nil(t, err)
 	assert.False(t, inUse)
 
 	// Create a secret referencing it
-	_, err = db.CreateSecret("KEY", "val", "myapp", "prod")
+	s, err := db.CreateSecret("KEY", "val", env.ID)
 	require.Nil(t, err)
 
-	inUse, err = db.EnvironmentInUse("myapp", "prod")
+	inUse, err = db.EnvironmentInUse(env.ID)
 	require.Nil(t, err)
 	assert.True(t, inUse)
 
 	// Clean up secret so we can test with policy
-	secrets, _ := db.ListSecrets("myapp", "prod")
-	db.DeleteSecret(secrets[0].ID)
+	db.DeleteSecret(s.ID)
 
 	// Create a policy referencing it
-	_, err = db.CreatePolicy("p1", "*", "*", "myapp", "prod")
+	_, err = db.CreatePolicy("p1", "*", "*", env.ID)
 	require.Nil(t, err)
 
-	inUse, err = db.EnvironmentInUse("myapp", "prod")
+	inUse, err = db.EnvironmentInUse(env.ID)
 	require.Nil(t, err)
 	assert.True(t, inUse)
-
-	_ = env
 }
 
-func TestEnvironmentValidation(t *testing.T) {
+func TestSecretFKConstraint(t *testing.T) {
 	db := testDB(t)
 
-	// Creating a secret without a matching environment should fail
-	_, err := db.CreateSecret("KEY", "val", "myapp", "prod")
+	// Creating a secret with a non-existent environment_id should fail (FK)
+	_, err := db.CreateSecret("KEY", "val", "nonexistent-env-id")
 	require.NotNil(t, err)
-	assert.ErrorIs(t, err, ErrInvalidEnvironment)
 
-	// Creating a policy without a matching environment should fail
-	_, err = db.CreatePolicy("p1", "*", "*", "myapp", "prod")
+	// Creating a policy with a non-existent environment_id should fail (FK)
+	_, err = db.CreatePolicy("p1", "*", "*", "nonexistent-env-id")
 	require.NotNil(t, err)
-	assert.ErrorIs(t, err, ErrInvalidEnvironment)
 
 	// Create the environment, then it should work
-	_, err = db.CreateEnvironment("myapp", "prod")
+	env, err := db.CreateEnvironment("myapp", "prod")
 	require.Nil(t, err)
 
-	_, err = db.CreateSecret("KEY", "val", "myapp", "prod")
+	_, err = db.CreateSecret("KEY", "val", env.ID)
 	require.Nil(t, err)
 
-	_, err = db.CreatePolicy("p1", "*", "*", "myapp", "prod")
+	_, err = db.CreatePolicy("p1", "*", "*", env.ID)
 	require.Nil(t, err)
 }
 
@@ -133,11 +174,11 @@ func TestSecretCRUD(t *testing.T) {
 	db := testDB(t)
 
 	// Set up environments first
-	_, err := db.CreateEnvironment("myapp", "prod")
+	env, err := db.CreateEnvironment("myapp", "prod")
 	require.Nil(t, err)
 
 	// Create
-	s, err := db.CreateSecret("API_KEY", "secret123", "myapp", "prod")
+	s, err := db.CreateSecret("API_KEY", "secret123", env.ID)
 	require.Nil(t, err)
 	require.NotEqual(t, "", s.ID)
 	assert.Equal(t, "API_KEY", s.Key)
@@ -148,6 +189,7 @@ func TestSecretCRUD(t *testing.T) {
 	require.NotNil(t, got)
 	assert.Equal(t, "secret123", got.Value)
 	assert.Equal(t, "myapp", got.Project)
+	assert.Equal(t, env.ID, got.EnvironmentID)
 
 	// List
 	secrets, err := db.ListSecrets("", "")
@@ -164,7 +206,7 @@ func TestSecretCRUD(t *testing.T) {
 	require.Equal(t, 0, len(secrets))
 
 	// Update
-	err = db.UpdateSecret(s.ID, "API_KEY", "newsecret", "myapp", "prod")
+	err = db.UpdateSecret(s.ID, "API_KEY", "newsecret", env.ID)
 	require.Nil(t, err)
 
 	got, _ = db.GetSecret(s.ID)
@@ -188,31 +230,31 @@ func TestGetSecretNotFound(t *testing.T) {
 
 func TestSecretUniqueConstraint(t *testing.T) {
 	db := testDB(t)
-	_, err := db.CreateEnvironment("proj", "env")
+	env, err := db.CreateEnvironment("proj", "env")
 	require.Nil(t, err)
 
-	_, err = db.CreateSecret("KEY", "val1", "proj", "env")
+	_, err = db.CreateSecret("KEY", "val1", env.ID)
 	require.Nil(t, err)
 
-	_, err = db.CreateSecret("KEY", "val2", "proj", "env")
+	_, err = db.CreateSecret("KEY", "val2", env.ID)
 	require.NotNil(t, err)
 }
 
-func TestGetSecretsByProjectEnv(t *testing.T) {
+func TestGetSecretsByEnvironmentID(t *testing.T) {
 	db := testDB(t)
-	_, err := db.CreateEnvironment("proj", "prod")
+	envProd, err := db.CreateEnvironment("proj", "prod")
 	require.Nil(t, err)
-	_, err = db.CreateEnvironment("proj", "dev")
+	envDev, err := db.CreateEnvironment("proj", "dev")
 	require.Nil(t, err)
-	_, err = db.CreateEnvironment("other", "prod")
+	envOther, err := db.CreateEnvironment("other", "prod")
 	require.Nil(t, err)
 
-	db.CreateSecret("A", "1", "proj", "prod")
-	db.CreateSecret("B", "2", "proj", "prod")
-	db.CreateSecret("C", "3", "proj", "dev")
-	db.CreateSecret("D", "4", "other", "prod")
+	db.CreateSecret("A", "1", envProd.ID)
+	db.CreateSecret("B", "2", envProd.ID)
+	db.CreateSecret("C", "3", envDev.ID)
+	db.CreateSecret("D", "4", envOther.ID)
 
-	secrets, err := db.GetSecretsByProjectEnv("proj", "prod")
+	secrets, err := db.GetSecretsByEnvironmentID(envProd.ID)
 	require.Nil(t, err)
 	require.Equal(t, 2, len(secrets))
 	assert.False(t, secrets["A"] != "1" || secrets["B"] != "2")
@@ -222,13 +264,13 @@ func TestPolicyCRUD(t *testing.T) {
 	db := testDB(t)
 
 	// Set up environments first
-	_, err := db.CreateEnvironment("myapp", "prod")
+	envProd, err := db.CreateEnvironment("myapp", "prod")
 	require.Nil(t, err)
-	_, err = db.CreateEnvironment("myapp", "staging")
+	envStaging, err := db.CreateEnvironment("myapp", "staging")
 	require.Nil(t, err)
 
 	// Create
-	p, err := db.CreatePolicy("Allow prod", "myorg/*", "refs/heads/main", "myapp", "prod")
+	p, err := db.CreatePolicy("Allow prod", "myorg/*", "refs/heads/main", envProd.ID)
 	require.Nil(t, err)
 	require.NotEqual(t, "", p.ID)
 
@@ -238,6 +280,7 @@ func TestPolicyCRUD(t *testing.T) {
 	require.NotNil(t, got)
 	assert.Equal(t, "Allow prod", got.Name)
 	assert.Equal(t, "myorg/*", got.RepositoryPattern)
+	assert.Equal(t, "myapp", got.Project)
 
 	// List
 	policies, err := db.ListPolicies()
@@ -245,7 +288,7 @@ func TestPolicyCRUD(t *testing.T) {
 	require.Equal(t, 1, len(policies))
 
 	// Update
-	err = db.UpdatePolicy(p.ID, "Updated", "other/*", "*", "myapp", "staging")
+	err = db.UpdatePolicy(p.ID, "Updated", "other/*", "*", envStaging.ID)
 	require.Nil(t, err)
 
 	got, _ = db.GetPolicy(p.ID)
@@ -270,16 +313,16 @@ func TestGetPolicyNotFound(t *testing.T) {
 
 func TestMatchingPolicies(t *testing.T) {
 	db := testDB(t)
-	_, err := db.CreateEnvironment("app", "prod")
+	envProd, err := db.CreateEnvironment("app", "prod")
 	require.Nil(t, err)
-	_, err = db.CreateEnvironment("app", "dev")
+	envDev, err := db.CreateEnvironment("app", "dev")
 	require.Nil(t, err)
-	_, err = db.CreateEnvironment("other", "prod")
+	envOther, err := db.CreateEnvironment("other", "prod")
 	require.Nil(t, err)
 
-	db.CreatePolicy("p1", "myorg/*", "refs/heads/main", "app", "prod")
-	db.CreatePolicy("p2", "myorg/specific", "*", "app", "dev")
-	db.CreatePolicy("p3", "other/*", "*", "other", "prod")
+	db.CreatePolicy("p1", "myorg/*", "refs/heads/main", envProd.ID)
+	db.CreatePolicy("p2", "myorg/specific", "*", envDev.ID)
+	db.CreatePolicy("p3", "other/*", "*", envOther.ID)
 
 	// Should match p1 only
 	matched, err := db.MatchingPolicies("myorg/repo", "refs/heads/main")
@@ -299,15 +342,15 @@ func TestMatchingPolicies(t *testing.T) {
 
 func TestDashboardStats(t *testing.T) {
 	db := testDB(t)
-	_, err := db.CreateEnvironment("proj", "prod")
+	envProd, err := db.CreateEnvironment("proj", "prod")
 	require.Nil(t, err)
-	_, err = db.CreateEnvironment("proj", "dev")
+	envDev, err := db.CreateEnvironment("proj", "dev")
 	require.Nil(t, err)
 
-	db.CreateSecret("A", "1", "proj", "prod")
-	db.CreateSecret("B", "2", "proj", "prod")
-	db.CreateSecret("C", "3", "proj", "dev")
-	db.CreatePolicy("p1", "*", "*", "proj", "prod")
+	db.CreateSecret("A", "1", envProd.ID)
+	db.CreateSecret("B", "2", envProd.ID)
+	db.CreateSecret("C", "3", envDev.ID)
+	db.CreatePolicy("p1", "*", "*", envProd.ID)
 
 	stats, err := db.GetDashboardStats()
 	require.Nil(t, err)
@@ -315,23 +358,6 @@ func TestDashboardStats(t *testing.T) {
 	assert.Equal(t, 1, stats.TotalPolicies)
 	assert.Equal(t, 2, stats.TotalEnvironments)
 	assert.Equal(t, 2, len(stats.Projects))
-}
-
-func TestSeedEnvironments(t *testing.T) {
-	// Test that existing data is seeded into environments table on migration.
-	// We can't easily test this with a fresh DB since there's no data to seed.
-	// But we can verify the seed function is idempotent.
-	db := testDB(t)
-	_, err := db.CreateEnvironment("proj", "prod")
-	require.Nil(t, err)
-
-	// Running seed again should not fail or create duplicates
-	err = db.seedEnvironments()
-	require.Nil(t, err)
-
-	envs, err := db.ListEnvironments()
-	require.Nil(t, err)
-	assert.Equal(t, 1, len(envs))
 }
 
 func TestCountEnvironments(t *testing.T) {
@@ -356,25 +382,116 @@ func TestDeleteEnvironmentNotFound(t *testing.T) {
 
 func TestUpdateSecretInvalidEnvironment(t *testing.T) {
 	db := testDB(t)
-	_, err := db.CreateEnvironment("myapp", "prod")
+	env, err := db.CreateEnvironment("myapp", "prod")
 	require.Nil(t, err)
 
-	s, err := db.CreateSecret("KEY", "val", "myapp", "prod")
+	s, err := db.CreateSecret("KEY", "val", env.ID)
 	require.Nil(t, err)
 
-	// Updating to a non-existent environment should fail
-	err = db.UpdateSecret(s.ID, "KEY", "val", "myapp", "nonexistent")
-	assert.ErrorIs(t, err, ErrInvalidEnvironment)
+	// Updating to a non-existent environment_id should fail (FK)
+	err = db.UpdateSecret(s.ID, "KEY", "val", "nonexistent-env-id")
+	require.NotNil(t, err)
 }
 
 func TestUpdatePolicyInvalidEnvironment(t *testing.T) {
 	db := testDB(t)
-	_, err := db.CreateEnvironment("myapp", "prod")
+	env, err := db.CreateEnvironment("myapp", "prod")
 	require.Nil(t, err)
 
-	p, err := db.CreatePolicy("p1", "*", "*", "myapp", "prod")
+	p, err := db.CreatePolicy("p1", "*", "*", env.ID)
 	require.Nil(t, err)
 
-	err = db.UpdatePolicy(p.ID, "p1", "*", "*", "myapp", "nonexistent")
-	assert.ErrorIs(t, err, ErrInvalidEnvironment)
+	err = db.UpdatePolicy(p.ID, "p1", "*", "*", "nonexistent-env-id")
+	require.NotNil(t, err)
+}
+
+func TestMigrateFromOldSchema(t *testing.T) {
+	// Create a database with the old schema (project/environment columns),
+	// then open it with New() to trigger the migration.
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i)
+	}
+	enc, err := crypto.NewEncryptor(key)
+	require.Nil(t, err)
+
+	dbPath := t.TempDir() + "/migrate-test.db"
+
+	// Create DB with old schema manually.
+	rawDB, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(wal)&_pragma=foreign_keys(on)")
+	require.Nil(t, err)
+
+	_, err = rawDB.Exec(`
+		CREATE TABLE environments (
+			id TEXT PRIMARY KEY,
+			project TEXT NOT NULL,
+			environment TEXT NOT NULL,
+			created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+			UNIQUE(project, environment)
+		);
+		CREATE TABLE secrets (
+			id TEXT PRIMARY KEY,
+			key TEXT NOT NULL,
+			value BLOB NOT NULL,
+			project TEXT NOT NULL,
+			environment TEXT NOT NULL,
+			created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+			updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
+			UNIQUE(key, project, environment)
+		);
+		CREATE TABLE access_policies (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			repository_pattern TEXT NOT NULL,
+			ref_pattern TEXT NOT NULL DEFAULT '*',
+			project TEXT NOT NULL,
+			environment TEXT NOT NULL,
+			created_at DATETIME NOT NULL DEFAULT (datetime('now'))
+		);
+	`)
+	require.Nil(t, err)
+
+	// Insert test data in old schema.
+	_, err = rawDB.Exec(`INSERT INTO environments (id, project, environment) VALUES ('env-1', 'app', 'prod')`)
+	require.Nil(t, err)
+
+	encrypted, err := enc.Encrypt([]byte("secret-value"))
+	require.Nil(t, err)
+	encB64 := base64.StdEncoding.EncodeToString(encrypted)
+
+	_, err = rawDB.Exec(`INSERT INTO secrets (id, key, value, project, environment) VALUES ('sec-1', 'API_KEY', ?, 'app', 'prod')`, encB64)
+	require.Nil(t, err)
+	_, err = rawDB.Exec(`INSERT INTO access_policies (id, name, repository_pattern, ref_pattern, project, environment) VALUES ('pol-1', 'allow', 'org/*', '*', 'app', 'prod')`)
+	require.Nil(t, err)
+
+	rawDB.Close()
+
+	// Now open with New() — should trigger migration.
+	db, err := New(dbPath, enc)
+	require.Nil(t, err)
+	defer db.Close()
+
+	// Verify the migration worked: secrets and policies use environment_id.
+	secret, err := db.GetSecret("sec-1")
+	require.Nil(t, err)
+	require.NotNil(t, secret)
+	assert.Equal(t, "API_KEY", secret.Key)
+	assert.Equal(t, "secret-value", secret.Value)
+	assert.Equal(t, "app", secret.Project)
+	assert.Equal(t, "prod", secret.Environment)
+	assert.Equal(t, "env-1", secret.EnvironmentID)
+
+	policy, err := db.GetPolicy("pol-1")
+	require.Nil(t, err)
+	require.NotNil(t, policy)
+	assert.Equal(t, "allow", policy.Name)
+	assert.Equal(t, "app", policy.Project)
+	assert.Equal(t, "prod", policy.Environment)
+	assert.Equal(t, "env-1", policy.EnvironmentID)
+
+	// Verify the environment is intact.
+	env, err := db.GetEnvironment("env-1")
+	require.Nil(t, err)
+	require.NotNil(t, env)
+	assert.Equal(t, "app", env.Project)
 }
