@@ -21,4 +21,5 @@ jobs:
             https://github.com/wow-look-at-my/go-toolchain/releases/latest/download/go-toolchain_linux_amd64
           chmod +x /usr/local/bin/go-toolchain
           git config --global url."https://${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
+          go-toolchain ignore coverage
           go-toolchain
