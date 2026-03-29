@@ -25,9 +25,23 @@ func (h *PublicHandler) Register(r chi.Router) {
 	r.Post(GitHubPrefix+"/secrets", h.fetchSecrets)
 }
 
+func (h *PublicHandler) logAccessDenied(actorType, actorID, reason string, extra map[string]any) {
+	m := map[string]any{"reason": reason}
+	for k, v := range extra {
+		m[k] = v
+	}
+	details, _ := json.Marshal(m)
+	if err := h.audit.CreateEntry("secret.access.denied", actorType, actorID, "secret", "", string(details)); err != nil {
+		slog.Error("audit log failed for denied access", "error", err, "reason", reason)
+	}
+}
+
 func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
 	authHeader := r.Header.Get("Authorization")
 	if !strings.HasPrefix(authHeader, "Bearer ") {
+		h.logAccessDenied("anonymous", "unknown", "missing_token", map[string]any{
+			"remote_addr": r.RemoteAddr,
+		})
 		http.Error(w, `{"error":"missing Bearer token"}`, http.StatusUnauthorized)
 		return
 	}
@@ -36,6 +50,10 @@ func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
 	claims, err := h.oidc.ValidateToken(r.Context(), token)
 	if err != nil {
 		slog.Warn("OIDC validation failed", "error", err)
+		h.logAccessDenied("anonymous", "unknown", "invalid_token", map[string]any{
+			"remote_addr": r.RemoteAddr,
+			"error":       err.Error(),
+		})
 		http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
 		return
 	}
@@ -49,6 +67,12 @@ func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
 	policies, err := h.db.MatchingPolicies(claims.Repository, claims.Ref)
 	if err != nil {
 		slog.Error("failed to match policies", "error", err)
+		h.logAccessDenied("github_actions", claims.Repository, "policy_lookup_error", map[string]any{
+			"repository": claims.Repository,
+			"ref":        claims.Ref,
+			"workflow":   claims.Workflow,
+			"error":      err.Error(),
+		})
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
 	}
@@ -58,6 +82,11 @@ func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
 			"repository", claims.Repository,
 			"ref", claims.Ref,
 		)
+		h.logAccessDenied("github_actions", claims.Repository, "no_matching_policies", map[string]any{
+			"repository": claims.Repository,
+			"ref":        claims.Ref,
+			"workflow":   claims.Workflow,
+		})
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte("{}"))
 		return
@@ -76,6 +105,14 @@ func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
 		secrets, err := h.db.GetSecretsByProjectEnv(p.Project, p.Environment)
 		if err != nil {
 			slog.Error("failed to get secrets", "project", p.Project, "environment", p.Environment, "error", err)
+			h.logAccessDenied("github_actions", claims.Repository, "secret_retrieval_error", map[string]any{
+				"repository":  claims.Repository,
+				"ref":         claims.Ref,
+				"workflow":    claims.Workflow,
+				"project":     p.Project,
+				"environment": p.Environment,
+				"error":       err.Error(),
+			})
 			http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 			return
 		}
