@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/wow-look-at-my/secret-server/internal/csrf"
+	gorillacsrf "github.com/gorilla/csrf"
 )
 
 //go:embed *.html
@@ -31,7 +31,7 @@ func New(adminPrefix string) (*Templates, error) {
 func (t *Templates) Render(w http.ResponseWriter, r *http.Request, name string, data any) {
 	token := ""
 	if r != nil {
-		token = csrf.TokenFromContext(r.Context())
+		token = gorillacsrf.Token(r)
 	}
 	tmpl, err := t.tmpl.Clone()
 	if err != nil {

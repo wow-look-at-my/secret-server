@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/wow-look-at-my/secret-server/internal/auth"
 	"github.com/wow-look-at-my/secret-server/internal/database"
 )
@@ -19,14 +20,14 @@ func NewAdminHandler(db *database.DB, audit *database.AuditDB) *AdminHandler {
 	return &AdminHandler{db: db, audit: audit}
 }
 
-func (h *AdminHandler) Register(mux *http.ServeMux) {
+func (h *AdminHandler) Register(r chi.Router) {
 	p := AdminPrefix + "/v1"
-	mux.HandleFunc("POST "+p+"/secrets", h.createSecret)
-	mux.HandleFunc("PUT "+p+"/secrets/{id}", h.updateSecret)
-	mux.HandleFunc("DELETE "+p+"/secrets/{id}", h.deleteSecret)
-	mux.HandleFunc("POST "+p+"/policies", h.createPolicy)
-	mux.HandleFunc("PUT "+p+"/policies/{id}", h.updatePolicy)
-	mux.HandleFunc("DELETE "+p+"/policies/{id}", h.deletePolicy)
+	r.Post(p+"/secrets", h.createSecret)
+	r.Put(p+"/secrets/{id}", h.updateSecret)
+	r.Delete(p+"/secrets/{id}", h.deleteSecret)
+	r.Post(p+"/policies", h.createPolicy)
+	r.Put(p+"/policies/{id}", h.updatePolicy)
+	r.Delete(p+"/policies/{id}", h.deletePolicy)
 }
 
 func adminActor(r *http.Request) string {
@@ -74,7 +75,7 @@ func (h *AdminHandler) createSecret(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminHandler) updateSecret(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	var req struct {
 		Key         string `json:"key"`
 		Value       string `json:"value"`
@@ -117,7 +118,7 @@ func (h *AdminHandler) updateSecret(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminHandler) deleteSecret(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	if err := h.db.DeleteSecret(id); err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			http.Error(w, `{"error":"secret not found"}`, http.StatusNotFound)
@@ -171,7 +172,7 @@ func (h *AdminHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	var req struct {
 		Name              string `json:"name"`
 		RepositoryPattern string `json:"repository_pattern"`
@@ -202,7 +203,7 @@ func (h *AdminHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminHandler) deletePolicy(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	if err := h.db.DeletePolicy(id); err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			http.Error(w, `{"error":"policy not found"}`, http.StatusNotFound)

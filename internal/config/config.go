@@ -1,9 +1,13 @@
 package config
 
 import (
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
+
+	"golang.org/x/crypto/hkdf"
 )
 
 type Config struct {
@@ -11,6 +15,7 @@ type Config struct {
 	DatabasePath       string
 	AuditDatabasePath  string
 	EncryptionKey      []byte
+	CSRFKey            []byte
 	CFAccessTeamDomain    string
 	CFAccessAdminAudience string
 	OIDCAudience          string
@@ -40,6 +45,13 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("ENCRYPTION_KEY must be 32 bytes (64 hex chars), got %d bytes", len(key))
 	}
 	cfg.EncryptionKey = key
+
+	hkdfReader := hkdf.New(sha256.New, cfg.EncryptionKey, nil, []byte("csrf-auth-key"))
+	csrfKey := make([]byte, 32)
+	if _, err := io.ReadFull(hkdfReader, csrfKey); err != nil {
+		return nil, fmt.Errorf("failed to derive CSRF key: %w", err)
+	}
+	cfg.CSRFKey = csrfKey
 
 	if cfg.CFAccessTeamDomain == "" {
 		return nil, fmt.Errorf("CF_ACCESS_TEAM_DOMAIN is required")

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/wow-look-at-my/secret-server/internal/auth"
 	"github.com/wow-look-at-my/secret-server/internal/database"
 	"github.com/wow-look-at-my/secret-server/internal/templates"
@@ -22,22 +23,26 @@ func NewUIHandler(db *database.DB, audit *database.AuditDB, tmpl *templates.Temp
 	return &UIHandler{db: db, audit: audit, tmpl: tmpl}
 }
 
-func (h *UIHandler) Register(mux *http.ServeMux) {
+func (h *UIHandler) Register(r chi.Router) {
 	p := AdminPrefix
-	mux.HandleFunc("GET "+p+"/", h.dashboard)
-	mux.HandleFunc("GET "+p+"/secrets", h.listSecrets)
-	mux.HandleFunc("GET "+p+"/secrets/new", h.newSecret)
-	mux.HandleFunc("GET "+p+"/secrets/{id}/edit", h.editSecret)
-	mux.HandleFunc("POST "+p+"/secrets", h.createSecret)
-	mux.HandleFunc("POST "+p+"/secrets/{id}", h.updateSecret)
-	mux.HandleFunc("POST "+p+"/secrets/{id}/delete", h.deleteSecretForm)
-	mux.HandleFunc("GET "+p+"/policies", h.listPolicies)
-	mux.HandleFunc("GET "+p+"/policies/new", h.newPolicy)
-	mux.HandleFunc("GET "+p+"/policies/{id}/edit", h.editPolicy)
-	mux.HandleFunc("POST "+p+"/policies", h.createPolicy)
-	mux.HandleFunc("POST "+p+"/policies/{id}", h.updatePolicy)
-	mux.HandleFunc("POST "+p+"/policies/{id}/delete", h.deletePolicyForm)
-	mux.HandleFunc("GET "+p+"/audit", h.auditLog)
+	r.Get(p+"/", h.dashboard)
+	r.Get(p+"/secrets", h.listSecrets)
+	r.Get(p+"/secrets/new", h.newSecret)
+	r.Get(p+"/secrets/{id}/edit", h.editSecret)
+	r.Post(p+"/secrets", h.createSecret)
+	r.Post(p+"/secrets/{id}", h.updateSecret)
+	r.Post(p+"/secrets/{id}/delete", h.deleteSecretForm)
+	r.Get(p+"/policies", h.listPolicies)
+	r.Get(p+"/policies/new", h.newPolicy)
+	r.Get(p+"/policies/{id}/edit", h.editPolicy)
+	r.Post(p+"/policies", h.createPolicy)
+	r.Post(p+"/policies/{id}", h.updatePolicy)
+	r.Post(p+"/policies/{id}/delete", h.deletePolicyForm)
+	r.Get(p+"/audit", h.auditLog)
+	// Catch-all: redirect unknown /admin/* paths to /admin/
+	r.Get(p+"/*", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, p+"/", http.StatusFound)
+	})
 }
 
 func uiActor(r *http.Request) string {
@@ -53,10 +58,6 @@ func uiActor(r *http.Request) string {
 }
 
 func (h *UIHandler) dashboard(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != AdminPrefix+"/" {
-		http.Redirect(w, r, AdminPrefix+"/", http.StatusFound)
-		return
-	}
 	stats, err := h.db.GetDashboardStats()
 	if err != nil {
 		slog.Error("dashboard stats failed", "error", err)
@@ -89,7 +90,7 @@ func (h *UIHandler) newSecret(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UIHandler) editSecret(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	secret, err := h.db.GetSecret(id)
 	if err != nil {
 		slog.Error("get secret failed", "error", err)
@@ -136,7 +137,7 @@ func (h *UIHandler) createSecret(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UIHandler) updateSecret(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
@@ -181,7 +182,7 @@ func (h *UIHandler) updateSecret(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UIHandler) deleteSecretForm(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	if err := h.db.DeleteSecret(id); err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			http.NotFound(w, r)
@@ -216,7 +217,7 @@ func (h *UIHandler) newPolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UIHandler) editPolicy(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	policy, err := h.db.GetPolicy(id)
 	if err != nil {
 		slog.Error("get policy failed", "error", err)
@@ -268,7 +269,7 @@ func (h *UIHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UIHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
@@ -304,7 +305,7 @@ func (h *UIHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UIHandler) deletePolicyForm(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	if err := h.db.DeletePolicy(id); err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			http.NotFound(w, r)
