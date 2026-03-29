@@ -23,6 +23,14 @@ func TestPublicFetchSecretsNoToken(t *testing.T) {
 	mux.ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+
+	entries, err := env.audit.ListEntries(10, 0)
+	require.Nil(t, err)
+	require.Equal(t, 1, len(entries))
+	assert.Equal(t, "secret.access.denied", entries[0].Action)
+	assert.Equal(t, "anonymous", entries[0].ActorType)
+	assert.Equal(t, "unknown", entries[0].ActorID)
+	assert.Contains(t, entries[0].Details, `"reason":"missing_token"`)
 }
 
 func TestPublicFetchSecretsWithPolicy(t *testing.T) {
@@ -75,6 +83,15 @@ func TestPublicFetchSecretsNoMatchingPolicy(t *testing.T) {
 	require.Equal(t, http.StatusOK, rr.Code)
 
 	assert.Equal(t, "{}", strings.TrimSpace(rr.Body.String()))
+
+	entries, err := env.audit.ListEntries(10, 0)
+	require.Nil(t, err)
+	require.Equal(t, 1, len(entries))
+	assert.Equal(t, "secret.access.denied", entries[0].Action)
+	assert.Equal(t, "github_actions", entries[0].ActorType)
+	assert.Equal(t, "myorg/repo", entries[0].ActorID)
+	assert.Contains(t, entries[0].Details, `"reason":"no_matching_policies"`)
+	assert.Contains(t, entries[0].Details, `"repository":"myorg/repo"`)
 }
 
 func TestPublicFetchSecretsInvalidToken(t *testing.T) {
@@ -90,6 +107,36 @@ func TestPublicFetchSecretsInvalidToken(t *testing.T) {
 
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
 	assert.Contains(t, rr.Body.String(), "invalid token")
+
+	entries, err := env.audit.ListEntries(10, 0)
+	require.Nil(t, err)
+	require.Equal(t, 1, len(entries))
+	assert.Equal(t, "secret.access.denied", entries[0].Action)
+	assert.Equal(t, "anonymous", entries[0].ActorType)
+	assert.Contains(t, entries[0].Details, `"reason":"invalid_token"`)
+}
+
+func TestPublicFetchSecretsPolicyDBError(t *testing.T) {
+	env := setupClosedMainDB(t)
+	h := NewPublicHandler(env.db, env.audit, env.oidc)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	token := makeOIDCToken(t, env.jwk, "myorg/repo", "refs/heads/main")
+	req := httptest.NewRequest("POST", "/github/v1/secrets", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+
+	entries, err := env.audit.ListEntries(10, 0)
+	require.Nil(t, err)
+	require.Equal(t, 1, len(entries))
+	assert.Equal(t, "secret.access.denied", entries[0].Action)
+	assert.Equal(t, "github_actions", entries[0].ActorType)
+	assert.Equal(t, "myorg/repo", entries[0].ActorID)
+	assert.Contains(t, entries[0].Details, `"reason":"policy_lookup_error"`)
 }
 
 func TestPublicFetchSecretsMultiplePoliciesSameProjectEnv(t *testing.T) {

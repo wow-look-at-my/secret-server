@@ -96,6 +96,13 @@ func setupClosedDB(t *testing.T) *testEnv {
 	return env
 }
 
+func setupClosedMainDB(t *testing.T) *testEnv {
+	t.Helper()
+	env := setup(t)
+	env.db.Close()
+	return env
+}
+
 func makeOIDCToken(t *testing.T, jwk jose.JSONWebKey, repo, ref string) string {
 	t.Helper()
 	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: jwk}, (&jose.SignerOptions{}).WithType("JWT"))
