@@ -27,13 +27,13 @@ reference the admin UI prefix.
 
 ## Key packages
 
-- `cmd/server` — entrypoint, route wiring
+- `cmd/server` — entrypoint, chi router wiring, gorilla/csrf middleware
 - `internal/auth` — CF Access JWT + GitHub OIDC validation
-- `internal/config` — env var loading
+- `internal/config` — env var loading (derives CSRF key from ENCRYPTION_KEY via HKDF)
 - `internal/crypto` — AES-256 encryption for secret values
 - `internal/database` — SQLite via modernc.org/sqlite
-- `internal/handlers` — HTTP handlers (admin API, public API, UI)
-- `internal/templates` — embedded HTML templates
+- `internal/handlers` — HTTP handlers (admin API, public API, UI); Register methods accept chi.Router
+- `internal/templates` — embedded HTML templates (CSRF token via gorilla/csrf)
 
 ## Configuration
 

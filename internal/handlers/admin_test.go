@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/wow-look-at-my/testify/assert"
 	"github.com/wow-look-at-my/testify/require"
 )
@@ -14,7 +15,7 @@ import (
 func TestAdminCreateAndDeleteSecret(t *testing.T) {
 	env := setup(t)
 	h := NewAdminHandler(env.db, env.audit)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	body := `{"key":"API_KEY","value":"secret","project":"app","environment":"prod"}`
@@ -52,7 +53,7 @@ func TestAdminCreateAndDeleteSecret(t *testing.T) {
 func TestAdminCreateSecretMissingFields(t *testing.T) {
 	env := setup(t)
 	h := NewAdminHandler(env.db, env.audit)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	body := `{"key":"API_KEY"}`
@@ -68,7 +69,7 @@ func TestAdminUpdateSecret(t *testing.T) {
 	s, _ := env.db.CreateSecret("KEY", "old", "app", "prod")
 
 	h := NewAdminHandler(env.db, env.audit)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	body := `{"key":"KEY","value":"new","project":"app","environment":"prod"}`
@@ -94,7 +95,7 @@ func TestAdminUpdateSecretEmptyValuePreservesExisting(t *testing.T) {
 	s, _ := env.db.CreateSecret("KEY", "original", "app", "prod")
 
 	h := NewAdminHandler(env.db, env.audit)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	body := `{"key":"KEY","value":"","project":"app","environment":"prod"}`
@@ -111,7 +112,7 @@ func TestAdminUpdateSecretEmptyValuePreservesExisting(t *testing.T) {
 func TestAdminPolicyCRUD(t *testing.T) {
 	env := setup(t)
 	h := NewAdminHandler(env.db, env.audit)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	body := `{"name":"test","repository_pattern":"org/*","project":"app","environment":"prod"}`
@@ -155,7 +156,7 @@ func TestAdminPolicyCRUD(t *testing.T) {
 func TestAdminCreatePolicyMissingFields(t *testing.T) {
 	env := setup(t)
 	h := NewAdminHandler(env.db, env.audit)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	body := `{"name":"test"}`
@@ -168,7 +169,7 @@ func TestAdminCreatePolicyMissingFields(t *testing.T) {
 func TestAdminCreatePolicyDefaultRefPattern(t *testing.T) {
 	env := setup(t)
 	h := NewAdminHandler(env.db, env.audit)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	body := `{"name":"test","repository_pattern":"org/*","project":"app","environment":"prod"}`
@@ -184,7 +185,7 @@ func TestAdminCreatePolicyDefaultRefPattern(t *testing.T) {
 func TestAdminUpdateNonexistentSecret(t *testing.T) {
 	env := setup(t)
 	h := NewAdminHandler(env.db, env.audit)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	body := `{"key":"KEY","value":"val","project":"app","environment":"prod"}`
@@ -197,7 +198,7 @@ func TestAdminUpdateNonexistentSecret(t *testing.T) {
 func TestAdminDeleteNonexistentSecret(t *testing.T) {
 	env := setup(t)
 	h := NewAdminHandler(env.db, env.audit)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	req := httptest.NewRequest("DELETE", "/admin/v1/secrets/nonexistent", nil)
@@ -209,7 +210,7 @@ func TestAdminDeleteNonexistentSecret(t *testing.T) {
 func TestAdminUpdateNonexistentPolicy(t *testing.T) {
 	env := setup(t)
 	h := NewAdminHandler(env.db, env.audit)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	body := `{"name":"test","repository_pattern":"org/*","ref_pattern":"*","project":"app","environment":"prod"}`
@@ -222,7 +223,7 @@ func TestAdminUpdateNonexistentPolicy(t *testing.T) {
 func TestAdminDeleteNonexistentPolicy(t *testing.T) {
 	env := setup(t)
 	h := NewAdminHandler(env.db, env.audit)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	req := httptest.NewRequest("DELETE", "/admin/v1/policies/nonexistent", nil)
@@ -234,7 +235,7 @@ func TestAdminDeleteNonexistentPolicy(t *testing.T) {
 func TestAdminInvalidJSON(t *testing.T) {
 	env := setup(t)
 	h := NewAdminHandler(env.db, env.audit)
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 	h.Register(mux)
 
 	req := httptest.NewRequest("POST", "/admin/v1/secrets", strings.NewReader("not json"))
