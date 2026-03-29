@@ -28,6 +28,9 @@ func (h *AdminHandler) Register(r chi.Router) {
 	r.Post(p+"/policies", h.createPolicy)
 	r.Put(p+"/policies/{id}", h.updatePolicy)
 	r.Delete(p+"/policies/{id}", h.deletePolicy)
+	r.Get(p+"/environments", h.listEnvironments)
+	r.Post(p+"/environments", h.createEnvironment)
+	r.Delete(p+"/environments/{id}", h.deleteEnvironment)
 }
 
 func adminActor(r *http.Request) string {
@@ -60,6 +63,10 @@ func (h *AdminHandler) createSecret(w http.ResponseWriter, r *http.Request) {
 
 	secret, err := h.db.CreateSecret(req.Key, req.Value, req.Project, req.Environment)
 	if err != nil {
+		if errors.Is(err, database.ErrInvalidEnvironment) {
+			http.Error(w, `{"error":"unknown project/environment pair: create it on the Environments page first"}`, http.StatusBadRequest)
+			return
+		}
 		http.Error(w, `{"error":"failed to create secret"}`, http.StatusInternalServerError)
 		return
 	}
@@ -103,6 +110,10 @@ func (h *AdminHandler) updateSecret(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.UpdateSecret(id, req.Key, req.Value, req.Project, req.Environment); err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			http.Error(w, `{"error":"secret not found"}`, http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, database.ErrInvalidEnvironment) {
+			http.Error(w, `{"error":"unknown project/environment pair: create it on the Environments page first"}`, http.StatusBadRequest)
 			return
 		}
 		http.Error(w, `{"error":"failed to update secret"}`, http.StatusInternalServerError)
@@ -157,6 +168,10 @@ func (h *AdminHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
 
 	policy, err := h.db.CreatePolicy(req.Name, req.RepositoryPattern, req.RefPattern, req.Project, req.Environment)
 	if err != nil {
+		if errors.Is(err, database.ErrInvalidEnvironment) {
+			http.Error(w, `{"error":"unknown project/environment pair: create it on the Environments page first"}`, http.StatusBadRequest)
+			return
+		}
 		http.Error(w, `{"error":"failed to create policy"}`, http.StatusInternalServerError)
 		return
 	}
@@ -190,6 +205,10 @@ func (h *AdminHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":"policy not found"}`, http.StatusNotFound)
 			return
 		}
+		if errors.Is(err, database.ErrInvalidEnvironment) {
+			http.Error(w, `{"error":"unknown project/environment pair: create it on the Environments page first"}`, http.StatusBadRequest)
+			return
+		}
 		http.Error(w, `{"error":"failed to update policy"}`, http.StatusInternalServerError)
 		return
 	}
@@ -214,6 +233,87 @@ func (h *AdminHandler) deletePolicy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.audit.CreateEntry("policy.delete", "admin", adminActor(r), "policy", id, "{}"); err != nil {
+		slog.Error("audit log failed", "error", err)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- Environments ---
+
+func (h *AdminHandler) listEnvironments(w http.ResponseWriter, r *http.Request) {
+	envs, err := h.db.ListEnvironments()
+	if err != nil {
+		http.Error(w, `{"error":"failed to list environments"}`, http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(envs)
+}
+
+func (h *AdminHandler) createEnvironment(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Project     string `json:"project"`
+		Environment string `json:"environment"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+	if req.Project == "" || req.Environment == "" {
+		http.Error(w, `{"error":"project and environment are required"}`, http.StatusBadRequest)
+		return
+	}
+
+	env, err := h.db.CreateEnvironment(req.Project, req.Environment)
+	if err != nil {
+		http.Error(w, `{"error":"failed to create environment"}`, http.StatusInternalServerError)
+		return
+	}
+
+	details, _ := json.Marshal(map[string]string{"project": req.Project, "environment": req.Environment})
+	if err := h.audit.CreateEntry("environment.create", "admin", adminActor(r), "environment", env.ID, string(details)); err != nil {
+		slog.Error("audit log failed", "error", err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{"id": env.ID})
+}
+
+func (h *AdminHandler) deleteEnvironment(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	env, err := h.db.GetEnvironment(id)
+	if err != nil {
+		http.Error(w, `{"error":"failed to get environment"}`, http.StatusInternalServerError)
+		return
+	}
+	if env == nil {
+		http.Error(w, `{"error":"environment not found"}`, http.StatusNotFound)
+		return
+	}
+
+	inUse, err := h.db.EnvironmentInUse(env.Project, env.Environment)
+	if err != nil {
+		http.Error(w, `{"error":"failed to check environment usage"}`, http.StatusInternalServerError)
+		return
+	}
+	if inUse {
+		http.Error(w, `{"error":"environment is still referenced by secrets or policies"}`, http.StatusConflict)
+		return
+	}
+
+	if err := h.db.DeleteEnvironment(id); err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			http.Error(w, `{"error":"environment not found"}`, http.StatusNotFound)
+			return
+		}
+		http.Error(w, `{"error":"failed to delete environment"}`, http.StatusInternalServerError)
+		return
+	}
+
+	details, _ := json.Marshal(map[string]string{"project": env.Project, "environment": env.Environment})
+	if err := h.audit.CreateEntry("environment.delete", "admin", adminActor(r), "environment", id, string(details)); err != nil {
 		slog.Error("audit log failed", "error", err)
 	}
 

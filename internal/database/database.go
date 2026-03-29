@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/wow-look-at-my/secret-server/internal/crypto"
 
 	_ "modernc.org/sqlite"
@@ -12,6 +13,10 @@ import (
 
 // ErrNotFound is returned when an update or delete affects zero rows.
 var ErrNotFound = errors.New("not found")
+
+// ErrInvalidEnvironment is returned when a secret or policy references a
+// project/environment pair that has not been created on the Environments page.
+var ErrInvalidEnvironment = errors.New("unknown project/environment: create it on the Environments page first")
 
 type DB struct {
 	db        *sql.DB
@@ -60,8 +65,48 @@ func (d *DB) migrate() error {
 			created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 		);
 
+		CREATE TABLE IF NOT EXISTS environments (
+			id TEXT PRIMARY KEY,
+			project TEXT NOT NULL,
+			environment TEXT NOT NULL,
+			created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+			UNIQUE(project, environment)
+		);
+
 		CREATE INDEX IF NOT EXISTS idx_secrets_project_env ON secrets(project, environment);
 		CREATE INDEX IF NOT EXISTS idx_policies_project_env ON access_policies(project, environment);
 	`)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Seed environments from existing secrets and policies data.
+	return d.seedEnvironments()
+}
+
+func (d *DB) seedEnvironments() error {
+	rows, err := d.db.Query(`
+		SELECT DISTINCT project, environment FROM secrets
+		UNION
+		SELECT DISTINCT project, environment FROM access_policies
+	`)
+	if err != nil {
+		return fmt.Errorf("query existing project/env pairs: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var project, environment string
+		if err := rows.Scan(&project, &environment); err != nil {
+			return fmt.Errorf("scan project/env pair: %w", err)
+		}
+		_, err := d.db.Exec(
+			"INSERT OR IGNORE INTO environments (id, project, environment) VALUES (?, ?, ?)",
+			uuid.New().String(), project, environment,
+		)
+		if err != nil {
+			return fmt.Errorf("seed environment %s/%s: %w", project, environment, err)
+		}
+	}
+	return rows.Err()
 }

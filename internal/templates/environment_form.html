@@ -1,0 +1,32 @@
+{{template "head" .}}
+{{define "title"}}New Environment - Secret Server{{end}}
+
+<h1>New Environment</h1>
+
+{{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+
+<form method="post" action="{{prefix}}/environments">
+    {{with csrfToken}}<input type="hidden" name="csrf_token" value="{{.}}">{{end}}
+    <div class="form-group">
+        <label for="project">Project</label>
+        <input type="text" id="project" name="project" required
+            value="{{if .Form}}{{index .Form "project" 0}}{{end}}"
+            placeholder="e.g. myapp">
+        <div class="hint">The application or service name. Groups related secrets together.</div>
+    </div>
+
+    <div class="form-group">
+        <label for="environment">Environment</label>
+        <input type="text" id="environment" name="environment" required
+            value="{{if .Form}}{{index .Form "environment" 0}}{{end}}"
+            placeholder="e.g. prod">
+        <div class="hint">Deployment stage (e.g. prod, staging, dev). Each project can have multiple environments.</div>
+    </div>
+
+    <div class="actions">
+        <button type="submit" class="btn btn-primary">Create</button>
+        <a href="{{prefix}}/environments" class="btn">Cancel</a>
+    </div>
+</form>
+
+{{template "foot" .}}

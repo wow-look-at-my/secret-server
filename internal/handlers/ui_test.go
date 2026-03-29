@@ -31,6 +31,8 @@ func TestUIPages(t *testing.T) {
 		{"GET", "/admin/secrets/new", http.StatusOK},
 		{"GET", "/admin/policies", http.StatusOK},
 		{"GET", "/admin/policies/new", http.StatusOK},
+		{"GET", "/admin/environments", http.StatusOK},
+		{"GET", "/admin/environments/new", http.StatusOK},
 	}
 
 	for _, p := range pages {
@@ -47,7 +49,9 @@ func TestUISecretCreateEditDelete(t *testing.T) {
 	mux := chi.NewRouter()
 	h.Register(mux)
 
-	form := "key=MY_KEY&value=my_secret&project=testproj&environment=staging"
+	envID := env.envID(t, "testproj", "staging")
+
+	form := "key=MY_KEY&value=my_secret&env_id=" + envID
 	req := httptest.NewRequest("POST", "/admin/secrets", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
@@ -63,7 +67,7 @@ func TestUISecretCreateEditDelete(t *testing.T) {
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusOK, rr.Code)
 
-	form = "key=MY_KEY&value=updated_secret&project=testproj&environment=staging"
+	form = "key=MY_KEY&value=updated_secret&env_id=" + envID
 	req = httptest.NewRequest("POST", "/admin/secrets/"+id, strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr = httptest.NewRecorder()
@@ -88,7 +92,10 @@ func TestUIPolicyCreateEditDelete(t *testing.T) {
 	mux := chi.NewRouter()
 	h.Register(mux)
 
-	form := "name=Test+Policy&repository_pattern=org/*&ref_pattern=*&project=app&environment=prod"
+	envIDProd := env.envID(t, "app", "prod")
+	envIDStaging := env.envID(t, "app", "staging")
+
+	form := "name=Test+Policy&repository_pattern=org/*&ref_pattern=*&env_id=" + envIDProd
 	req := httptest.NewRequest("POST", "/admin/policies", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
@@ -104,7 +111,7 @@ func TestUIPolicyCreateEditDelete(t *testing.T) {
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusOK, rr.Code)
 
-	form = "name=Updated+Policy&repository_pattern=org/*&ref_pattern=refs/heads/main&project=app&environment=staging"
+	form = "name=Updated+Policy&repository_pattern=org/*&ref_pattern=refs/heads/main&env_id=" + envIDStaging
 	req = httptest.NewRequest("POST", "/admin/policies/"+id, strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr = httptest.NewRecorder()
@@ -142,7 +149,8 @@ func TestUIUpdateNonexistentSecret(t *testing.T) {
 	mux := chi.NewRouter()
 	h.Register(mux)
 
-	form := "key=K&value=v&project=app&environment=prod"
+	envID := env.envID(t, "app", "prod")
+	form := "key=K&value=v&env_id=" + envID
 	req := httptest.NewRequest("POST", "/admin/secrets/nonexistent", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
@@ -168,7 +176,8 @@ func TestUIUpdateNonexistentPolicy(t *testing.T) {
 	mux := chi.NewRouter()
 	h.Register(mux)
 
-	form := "name=P&repository_pattern=org/*&ref_pattern=*&project=app&environment=prod"
+	envID := env.envID(t, "app", "prod")
+	form := "name=P&repository_pattern=org/*&ref_pattern=*&env_id=" + envID
 	req := httptest.NewRequest("POST", "/admin/policies/nonexistent", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
@@ -206,7 +215,8 @@ func TestUIPolicyCreateDefaultRefPattern(t *testing.T) {
 	mux := chi.NewRouter()
 	h.Register(mux)
 
-	form := "name=NoRef&repository_pattern=org/*&project=app&environment=prod"
+	envID := env.envID(t, "app", "prod")
+	form := "name=NoRef&repository_pattern=org/*&env_id=" + envID
 	req := httptest.NewRequest("POST", "/admin/policies", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
@@ -239,7 +249,8 @@ func TestUISecretCreateDuplicate(t *testing.T) {
 	mux := chi.NewRouter()
 	h.Register(mux)
 
-	form := "key=DUP_KEY&value=val2&project=proj&environment=env"
+	envID := env.envID(t, "proj", "env")
+	form := "key=DUP_KEY&value=val2&env_id=" + envID
 	req := httptest.NewRequest("POST", "/admin/secrets", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
@@ -271,7 +282,8 @@ func TestUIUpdatePolicyViaForm(t *testing.T) {
 	mux := chi.NewRouter()
 	h.Register(mux)
 
-	form := "name=Updated&repository_pattern=org/*&ref_pattern=refs/heads/main&project=app&environment=staging"
+	envID := env.envID(t, "app", "staging")
+	form := "name=Updated&repository_pattern=org/*&ref_pattern=refs/heads/main&env_id=" + envID
 	req := httptest.NewRequest("POST", "/admin/policies/"+p.ID, strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
@@ -291,7 +303,8 @@ func TestUIUpdatePolicyDefaultRefPattern(t *testing.T) {
 	mux := chi.NewRouter()
 	h.Register(mux)
 
-	form := "name=Updated&repository_pattern=org/*&project=app&environment=prod"
+	envID := env.envID(t, "app", "prod")
+	form := "name=Updated&repository_pattern=org/*&env_id=" + envID
 	req := httptest.NewRequest("POST", "/admin/policies/"+p.ID, strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
@@ -344,7 +357,8 @@ func TestUIUpdateSecretViaForm(t *testing.T) {
 	mux := chi.NewRouter()
 	h.Register(mux)
 
-	form := "key=UPD&value=new_val&project=app&environment=prod"
+	envID := env.envID(t, "app", "prod")
+	form := "key=UPD&value=new_val&env_id=" + envID
 	req := httptest.NewRequest("POST", "/admin/secrets/"+s.ID, strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
@@ -363,7 +377,8 @@ func TestUIUpdateSecretEmptyValuePreservesExisting(t *testing.T) {
 	mux := chi.NewRouter()
 	h.Register(mux)
 
-	form := "key=KEEP&value=&project=app&environment=prod"
+	envID := env.envID(t, "app", "prod")
+	form := "key=KEEP&value=&env_id=" + envID
 	req := httptest.NewRequest("POST", "/admin/secrets/"+s.ID, strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
@@ -382,7 +397,7 @@ func TestUICreateSecretDBError(t *testing.T) {
 	mux := chi.NewRouter()
 	h.Register(mux)
 
-	form := "key=K&value=v&project=app&environment=prod"
+	form := "key=K&value=v&env_id=some-id"
 	req := httptest.NewRequest("POST", "/admin/secrets", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
@@ -396,7 +411,7 @@ func TestUIUpdateSecretDBError(t *testing.T) {
 	mux := chi.NewRouter()
 	h.Register(mux)
 
-	form := "key=K&value=v&project=app&environment=prod"
+	form := "key=K&value=v&env_id=some-id"
 	req := httptest.NewRequest("POST", "/admin/secrets/some-id", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
@@ -410,7 +425,7 @@ func TestUICreatePolicyDBError(t *testing.T) {
 	mux := chi.NewRouter()
 	h.Register(mux)
 
-	form := "name=P&repository_pattern=org/*&ref_pattern=*&project=app&environment=prod"
+	form := "name=P&repository_pattern=org/*&ref_pattern=*&env_id=some-id"
 	req := httptest.NewRequest("POST", "/admin/policies", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
@@ -424,7 +439,7 @@ func TestUIUpdatePolicyDBError(t *testing.T) {
 	mux := chi.NewRouter()
 	h.Register(mux)
 
-	form := "name=P&repository_pattern=org/*&ref_pattern=*&project=app&environment=prod"
+	form := "name=P&repository_pattern=org/*&ref_pattern=*&env_id=some-id"
 	req := httptest.NewRequest("POST", "/admin/policies/some-id", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
@@ -555,4 +570,151 @@ func TestUIAuditLogDBError(t *testing.T) {
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+}
+
+// --- Environment UI tests ---
+
+func TestUIEnvironmentCreateAndDelete(t *testing.T) {
+	env := setup(t)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	form := "project=newproj&environment=newenv"
+	req := httptest.NewRequest("POST", "/admin/environments", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusSeeOther, rr.Code)
+
+	envs, _ := env.db.ListEnvironments()
+	var newEnvID string
+	for _, e := range envs {
+		if e.Project == "newproj" && e.Environment == "newenv" {
+			newEnvID = e.ID
+			break
+		}
+	}
+	require.NotEmpty(t, newEnvID)
+
+	// Delete it (not in use)
+	req = httptest.NewRequest("POST", "/admin/environments/"+newEnvID+"/delete", nil)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusSeeOther, rr.Code)
+}
+
+func TestUIEnvironmentDeleteBlocked(t *testing.T) {
+	env := setup(t)
+	env.db.CreateSecret("KEY", "val", "app", "prod")
+
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	envID := env.envID(t, "app", "prod")
+	req := httptest.NewRequest("POST", "/admin/environments/"+envID+"/delete", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	// Should render the list page with an error, not redirect
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Body.String(), "Cannot delete")
+}
+
+func TestUIEnvironmentDeleteNotFound(t *testing.T) {
+	env := setup(t)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	req := httptest.NewRequest("POST", "/admin/environments/nonexistent/delete", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+func TestUIEnvironmentDeleteDBError(t *testing.T) {
+	env := setupClosedDB(t)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	req := httptest.NewRequest("POST", "/admin/environments/some-id/delete", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+}
+
+func TestUIEnvironmentListDBError(t *testing.T) {
+	env := setupClosedDB(t)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	req := httptest.NewRequest("GET", "/admin/environments", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+}
+
+func TestUISecretCreateInvalidEnvID(t *testing.T) {
+	env := setup(t)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	// Missing env_id
+	form := "key=K&value=v"
+	req := httptest.NewRequest("POST", "/admin/secrets", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code) // re-renders form with error
+	assert.Contains(t, rr.Body.String(), "Invalid environment")
+}
+
+func TestUIPolicyCreateInvalidEnvID(t *testing.T) {
+	env := setup(t)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	form := "name=P&repository_pattern=org/*"
+	req := httptest.NewRequest("POST", "/admin/policies", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code) // re-renders form with error
+	assert.Contains(t, rr.Body.String(), "Invalid environment")
+}
+
+func TestUIEnvironmentCreateDuplicate(t *testing.T) {
+	env := setup(t)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	// app/prod already exists from setup
+	form := "project=app&environment=prod"
+	req := httptest.NewRequest("POST", "/admin/environments", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code) // re-renders form with error
+	assert.Contains(t, rr.Body.String(), "Failed to create")
+}
+
+func TestUIEnvironmentCreateMissingFields(t *testing.T) {
+	env := setup(t)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	form := "project=&environment="
+	req := httptest.NewRequest("POST", "/admin/environments", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Body.String(), "required")
 }

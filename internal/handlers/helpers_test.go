@@ -61,7 +61,31 @@ func setup(t *testing.T) *testEnv {
 	oidc := auth.NewGitHubOIDCValidator("https://secrets.example.com")
 	auth.SetJWKSForTesting(oidc, &jose.JSONWebKeySet{Keys: []jose.JSONWebKey{pub}})
 
+	// Pre-create common environments used by handler tests.
+	for _, pair := range [][2]string{
+		{"app", "prod"}, {"app", "staging"}, {"app", "dev"},
+		{"proj", "prod"}, {"proj", "dev"}, {"proj", "env"},
+		{"testproj", "staging"}, {"other", "prod"},
+		{"myapp", "prod"},
+	} {
+		db.CreateEnvironment(pair[0], pair[1])
+	}
+
 	return &testEnv{db: db, audit: auditDB, tmpl: tmpl, key: rsaKey, jwk: jwk, pub: pub, oidc: oidc}
+}
+
+// envID returns the environment ID for a project+environment pair, for use in form tests.
+func (e *testEnv) envID(t *testing.T, project, environment string) string {
+	t.Helper()
+	envs, err := e.db.ListEnvironments()
+	require.Nil(t, err)
+	for _, env := range envs {
+		if env.Project == project && env.Environment == environment {
+			return env.ID
+		}
+	}
+	t.Fatalf("environment %s/%s not found in test setup", project, environment)
+	return ""
 }
 
 func setupClosedDB(t *testing.T) *testEnv {

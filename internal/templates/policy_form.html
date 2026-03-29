@@ -32,19 +32,21 @@
     </div>
 
     <div class="form-group">
-        <label for="project">Project</label>
-        <input type="text" id="project" name="project" required
-            value="{{if .IsNew}}{{else}}{{.Policy.Project}}{{end}}"
-            placeholder="e.g. myapp">
-        <div class="hint">The project whose secrets this policy grants access to.</div>
-    </div>
-
-    <div class="form-group">
-        <label for="environment">Environment</label>
-        <input type="text" id="environment" name="environment" required
-            value="{{if .IsNew}}{{else}}{{.Policy.Environment}}{{end}}"
-            placeholder="e.g. prod">
-        <div class="hint">The environment whose secrets this policy grants access to.</div>
+        <label for="env_id">Project / Environment</label>
+        {{if .Environments}}
+        <select id="env_id" name="env_id" required>
+            <option value="">-- Select Environment --</option>
+            {{range .Environments}}
+            <option value="{{.ID}}"
+                {{if and (not $.IsNew) (eq $.Policy.Project .Project) (eq $.Policy.Environment .Environment)}}selected{{end}}>
+                {{.Project}} / {{.Environment}}
+            </option>
+            {{end}}
+        </select>
+        {{else}}
+        <p style="margin:0.5rem 0;">No environments defined yet. <a href="{{prefix}}/environments/new">Create one</a> first.</p>
+        {{end}}
+        <div class="hint">The project and environment whose secrets this policy grants access to. <a href="{{prefix}}/environments">Manage environments</a>.</div>
     </div>
 
     <div class="actions">
