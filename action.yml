@@ -33,11 +33,14 @@ runs:
         fi
 
         # Fetch secrets from the server
-        SECRETS=$(curl -s -f -H "Authorization: Bearer ${OIDC_TOKEN}" \
-          "${SECRET_SERVER_URL}/github/v1/secrets")
+        HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer ${OIDC_TOKEN}" \
+          -X POST "${SECRET_SERVER_URL}/github/v1/secrets")
 
-        if [ $? -ne 0 ]; then
-          echo "::error::Failed to fetch secrets from server"
+        HTTP_STATUS=$(echo "$HTTP_RESPONSE" | tail -1)
+        SECRETS=$(echo "$HTTP_RESPONSE" | sed '$d')
+
+        if [ "$HTTP_STATUS" -lt 200 ] || [ "$HTTP_STATUS" -ge 300 ]; then
+          echo "::error::Secret server returned HTTP ${HTTP_STATUS}: ${SECRETS}"
           exit 1
         fi
 

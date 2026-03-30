@@ -34,7 +34,7 @@ jobs:
 
           COUNT=$(echo "$SECRETS_JSON" | jq 'length')
           if [ "$COUNT" -lt 1 ]; then
-            echo "::error::Expected at least 1 secret, got $COUNT"
+            echo "::error::Expected at least 1 secret, got $COUNT — is there a policy for wow-look-at-my/secret-server?"
             exit 1
           fi
 
