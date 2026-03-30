@@ -62,6 +62,24 @@ func (d *DB) ListEnvironments() ([]Environment, error) {
 	return envs, rows.Err()
 }
 
+func (d *DB) UpdateEnvironment(id, project, environment string) error {
+	result, err := d.db.Exec(
+		"UPDATE environments SET project = ?, environment = ? WHERE id = ?",
+		project, environment, id,
+	)
+	if err != nil {
+		return fmt.Errorf("update environment: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (d *DB) DeleteEnvironment(id string) error {
 	result, err := d.db.Exec("DELETE FROM environments WHERE id = ?", id)
 	if err != nil {
@@ -77,24 +95,11 @@ func (d *DB) DeleteEnvironment(id string) error {
 	return nil
 }
 
-func (d *DB) EnvironmentExists(project, environment string) (bool, error) {
+// EnvironmentInUse checks whether any secrets or policies reference the given environment ID.
+func (d *DB) EnvironmentInUse(id string) (bool, error) {
 	var count int
 	err := d.db.QueryRow(
-		"SELECT COUNT(*) FROM environments WHERE project = ? AND environment = ?",
-		project, environment,
-	).Scan(&count)
-	if err != nil {
-		return false, fmt.Errorf("check environment exists: %w", err)
-	}
-	return count > 0, nil
-}
-
-// EnvironmentInUse checks whether any secrets or policies reference the given project/environment pair.
-func (d *DB) EnvironmentInUse(project, environment string) (bool, error) {
-	var count int
-	err := d.db.QueryRow(
-		"SELECT COUNT(*) FROM secrets WHERE project = ? AND environment = ?",
-		project, environment,
+		"SELECT COUNT(*) FROM secrets WHERE environment_id = ?", id,
 	).Scan(&count)
 	if err != nil {
 		return false, err
@@ -103,8 +108,7 @@ func (d *DB) EnvironmentInUse(project, environment string) (bool, error) {
 		return true, nil
 	}
 	err = d.db.QueryRow(
-		"SELECT COUNT(*) FROM access_policies WHERE project = ? AND environment = ?",
-		project, environment,
+		"SELECT COUNT(*) FROM access_policies WHERE environment_id = ?", id,
 	).Scan(&count)
 	if err != nil {
 		return false, err

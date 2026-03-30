@@ -22,7 +22,7 @@ Route constants are in `internal/handlers/routes.go`. Templates use `{{prefix}}`
 reference the admin UI prefix.
 
 - **Encryption at rest**: Secrets are AES-256-GCM encrypted in SQLite, base64-encoded. Decrypted only in memory on retrieval.
-- **Managed environments**: Project/environment pairs are first-class entities. Secrets and policies reference them via dropdown (no free-text). Auto-seeded from existing data on migration.
+- **Managed environments**: Project/environment pairs are first-class entities with UUID primary keys. Secrets and policies reference them by `environment_id` (FK), not by string tuple. Environments can be renamed without updating referencing rows. Auto-migrated from legacy string-column schema on upgrade.
 - **Policy-based access**: Glob patterns on repository name + git ref determine which secrets a workflow can access.
 - **Pure-Go SQLite**: Uses `modernc.org/sqlite` (no CGO required). CGO is disabled in the build.
 
