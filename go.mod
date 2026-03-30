@@ -9,19 +9,18 @@ require (
 	github.com/gorilla/csrf v1.7.3
 	github.com/wow-look-at-my/testify v0.0.0-20260217010200-5fd2c08e3abb
 	golang.org/x/crypto v0.49.0
-	modernc.org/sqlite v1.37.1
+	modernc.org/sqlite v1.48.0
 )
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/gorilla/securecookie v1.1.2 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
-	github.com/ncruces/go-strftime v0.1.9 // indirect
+	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	golang.org/x/exp v0.0.0-20250408133849-7e4ce0ab07d0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	modernc.org/libc v1.65.7 // indirect
+	modernc.org/libc v1.70.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
