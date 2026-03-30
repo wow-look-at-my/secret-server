@@ -44,6 +44,19 @@ func TestUIPages(t *testing.T) {
 	}
 }
 
+func TestUIAdminRedirect(t *testing.T) {
+	env := setup(t)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	req := httptest.NewRequest("GET", "/admin", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusFound, rr.Code)
+	assert.Equal(t, "/admin/", rr.Header().Get("Location"))
+}
+
 func TestUISecretCreateEditDelete(t *testing.T) {
 	env := setup(t)
 	h := NewUIHandler(env.db, env.audit, env.tmpl)

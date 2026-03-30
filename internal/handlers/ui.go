@@ -47,6 +47,10 @@ func (h *UIHandler) Register(r chi.Router) {
 	r.Post(p+"/environments/{id}", h.updateEnvironment)
 	r.Post(p+"/environments/{id}/delete", h.deleteEnvironmentForm)
 	r.Get(p+"/audit", h.auditLog)
+	// Redirect /admin (no trailing slash) to /admin/
+	r.Get(p, func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, p+"/", http.StatusFound)
+	})
 	// Catch-all: redirect unknown /admin/* paths to /admin/
 	r.Get(p+"/*", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, p+"/", http.StatusFound)
