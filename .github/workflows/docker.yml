@@ -34,7 +34,7 @@ jobs:
       - name: Create Dockerfile
         run: |
           cat > Dockerfile <<'EOF'
-          FROM --platform=$BUILDPLATFORM golang:1.24 AS builder
+          FROM --platform=$BUILDPLATFORM golang:1.25 AS builder
           WORKDIR /src
           COPY go.mod go.sum ./
           RUN --mount=type=secret,id=github_token \

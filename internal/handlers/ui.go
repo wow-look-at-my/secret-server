@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
@@ -98,6 +100,36 @@ func (h *UIHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 	h.tmpl.Render(w, r, "dashboard.html", stats)
 }
 
+// base64JSONStructure tries to base64-decode a value and parse it as JSON.
+// If the value is a base64-encoded JSON object, it returns a redacted version
+// showing only top-level keys with "..." as values. Returns empty string otherwise.
+func base64JSONStructure(value string) string {
+	decoded, err := base64.StdEncoding.DecodeString(value)
+	if err != nil {
+		// Try URL-safe base64 as well.
+		decoded, err = base64.URLEncoding.DecodeString(value)
+		if err != nil {
+			return ""
+		}
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(decoded, &obj); err != nil {
+		return ""
+	}
+	redacted := make(map[string]string, len(obj))
+	keys := make([]string, 0, len(obj))
+	for k := range obj {
+		keys = append(keys, k)
+		redacted[k] = "..."
+	}
+	sort.Strings(keys)
+	out, err := json.MarshalIndent(redacted, "", "  ")
+	if err != nil {
+		return ""
+	}
+	return string(out)
+}
+
 // --- Secrets ---
 
 func (h *UIHandler) listSecrets(w http.ResponseWriter, r *http.Request) {
@@ -159,11 +191,15 @@ func (h *UIHandler) editSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	envs, _ := h.db.ListEnvironments()
-	h.tmpl.Render(w, r, "secret_form.html", map[string]any{
+	data := map[string]any{
 		"IsNew":        false,
 		"Secret":       secret,
 		"Environments": envs,
-	})
+	}
+	if structure := base64JSONStructure(secret.Value); structure != "" {
+		data["JSONStructure"] = structure
+	}
+	h.tmpl.Render(w, r, "secret_form.html", data)
 }
 
 func (h *UIHandler) createSecret(w http.ResponseWriter, r *http.Request) {
