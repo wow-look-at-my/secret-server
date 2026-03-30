@@ -143,7 +143,7 @@ func TestPublicAPINoAuth(t *testing.T) {
 	require.Nil(t, err)
 
 	// Public endpoint returns 401 for missing Bearer, not CF Access 401
-	req := httptest.NewRequest("POST", handlers.GitHubPrefix+"/secrets", nil)
+	req := httptest.NewRequest("GET", handlers.GitHubPrefix+"/secrets", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
@@ -155,4 +155,12 @@ func TestSetupLogging(t *testing.T) {
 	for _, level := range []string{"debug", "info", "warn", "error", "unknown"} {
 		setupLogging(level) // should not panic
 	}
+}
+
+func TestBuildVersion(t *testing.T) {
+	// buildVersion reads debug.ReadBuildInfo; in test binaries this returns
+	// build info but without vcs settings, so the result should be empty.
+	v := buildVersion()
+	// Just verify it doesn't panic and returns a string.
+	_ = v
 }

@@ -112,6 +112,19 @@ func TestAdminUpdateSecretEmptyValuePreservesExisting(t *testing.T) {
 	assert.Equal(t, "original", got.Value)
 }
 
+func TestAdminUpdateSecretEmptyValueNotFound(t *testing.T) {
+	env := setup(t)
+	h := NewAdminHandler(env.db, env.audit)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	body := `{"key":"KEY","value":"","project":"app","environment":"prod"}`
+	req := httptest.NewRequest("PUT", "/admin/v1/secrets/nonexistent", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
 func TestAdminPolicyCRUD(t *testing.T) {
 	env := setup(t)
 	h := NewAdminHandler(env.db, env.audit)
@@ -308,6 +321,20 @@ func TestAdminDeleteEnvironmentInUse(t *testing.T) {
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusConflict, rr.Code)
+}
+
+func TestAdminDeleteEnvironmentSuccess(t *testing.T) {
+	env := setup(t)
+	h := NewAdminHandler(env.db, env.audit)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	// "other/prod" is pre-created but has no secrets or policies referencing it.
+	envID := env.envID(t, "other", "prod")
+	req := httptest.NewRequest("DELETE", "/admin/v1/environments/"+envID, nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusNoContent, rr.Code)
 }
 
 func TestAdminDeleteEnvironmentNotFound(t *testing.T) {

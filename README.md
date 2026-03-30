@@ -6,7 +6,7 @@ Self-hosted secrets manager for homelab use. Single Go binary with SQLite storag
 
 | Zone | Routes | Auth | Access |
 |------|--------|------|--------|
-| GitHub API | `POST /github/v1/secrets` | GitHub Actions OIDC JWT | Read-only — vend secrets matching policies |
+| GitHub API | `GET /github/v1/secrets` | GitHub Actions OIDC JWT | Read-only — vend secrets matching policies |
 | Admin API | `/admin/v1/*` | Cloudflare Access JWT | Create, update, delete secrets, policies, and environments |
 | Admin UI | `/admin/*` | Cloudflare Access JWT | Web UI for managing secrets, policies, and environments |
 
