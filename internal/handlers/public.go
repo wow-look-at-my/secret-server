@@ -37,6 +37,9 @@ func (h *PublicHandler) logAccessDenied(actorType, actorID, reason string, extra
 }
 
 func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
+	// Limit request body to prevent abuse (this is a GET endpoint but limit anyway).
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+
 	authHeader := r.Header.Get("Authorization")
 	if !strings.HasPrefix(authHeader, "Bearer ") {
 		h.logAccessDenied("anonymous", "unknown", "missing_token", map[string]any{
@@ -92,17 +95,16 @@ func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Collect secrets from all matching policies (deduplicate by key)
+	// Collect secrets from all matching policies (deduplicate by environment ID)
 	result := make(map[string]string)
 	seen := make(map[string]bool)
 	for _, p := range policies {
-		pairKey := p.Project + "/" + p.Environment
-		if seen[pairKey] {
+		if seen[p.EnvironmentID] {
 			continue
 		}
-		seen[pairKey] = true
+		seen[p.EnvironmentID] = true
 
-		secrets, err := h.db.GetSecretsByProjectEnv(p.Project, p.Environment)
+		secrets, err := h.db.GetSecretsByEnvironmentID(p.EnvironmentID)
 		if err != nil {
 			slog.Error("failed to get secrets", "project", p.Project, "environment", p.Environment, "error", err)
 			h.logAccessDenied("github_actions", claims.Repository, "secret_retrieval_error", map[string]any{

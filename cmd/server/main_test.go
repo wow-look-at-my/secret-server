@@ -151,6 +151,36 @@ func TestPublicAPINoAuth(t *testing.T) {
 	assert.Contains(t, rr.Body.String(), "Bearer")
 }
 
+func TestSecurityHeaders(t *testing.T) {
+	db, auditDB := testDB(t)
+	cfg := &config.Config{
+		CFAccessTeamDomain:    "team",
+		CFAccessAdminAudience: "aud",
+	}
+	mux, err := buildMux(db, auditDB, cfg)
+	require.Nil(t, err)
+
+	// Security headers should appear on all responses (e.g. /health).
+	req := httptest.NewRequest("GET", "/health", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	assert.Equal(t, "nosniff", rr.Header().Get("X-Content-Type-Options"))
+	assert.Equal(t, "DENY", rr.Header().Get("X-Frame-Options"))
+	assert.Contains(t, rr.Header().Get("Strict-Transport-Security"), "max-age=")
+	assert.Equal(t, "strict-origin-when-cross-origin", rr.Header().Get("Referrer-Policy"))
+	assert.Contains(t, rr.Header().Get("Permissions-Policy"), "camera=()")
+
+	// Public API should also have security headers.
+	req = httptest.NewRequest("GET", handlers.GitHubPrefix+"/secrets", nil)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	assert.Equal(t, "DENY", rr.Header().Get("X-Frame-Options"))
+	// Public API should NOT have CSP (that's UI-only).
+	assert.Empty(t, rr.Header().Get("Content-Security-Policy"))
+}
+
 func TestSetupLogging(t *testing.T) {
 	for _, level := range []string{"debug", "info", "warn", "error", "unknown"} {
 		setupLogging(level) // should not panic

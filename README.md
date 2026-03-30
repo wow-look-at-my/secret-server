@@ -82,15 +82,15 @@ All state-changing operations are recorded in a separate SQLite database (`audit
 - **Secret access** — which GitHub Actions repository/ref/workflow fetched secrets, and which policies matched
 - **Secret management** — create, update, delete operations by admin users
 - **Policy management** — create, update, delete operations by admin users
-- **Environment management** — create, delete operations by admin users
+- **Environment management** — create, update, delete operations by admin users
 
 The audit log is isolated from the secrets database to prevent corruption of credential data during hardware or power failures. View the audit log at `/ui/audit`.
 
 ## Environments
 
-Environments are managed project/environment pairs (e.g. `myapp`/`prod`, `myapp`/`staging`). They must be created on the Environments page before they can be used. Secrets and policies reference environments via dropdown — no free-text entry. This prevents typos and ensures consistency.
+Environments are managed project/environment pairs (e.g. `myapp`/`prod`, `myapp`/`staging`) with UUID primary keys. They must be created on the Environments page before they can be used. Secrets and policies reference environments by `environment_id` (foreign key), not by string columns. This means environments can be renamed freely — all referencing secrets and policies automatically reflect the new name.
 
-On upgrade, existing project/environment pairs from secrets and policies are automatically seeded into the environments table.
+On upgrade from older versions, the schema is automatically migrated: existing project/environment string columns are replaced with `environment_id` foreign keys in a transaction.
 
 ## Access Policies
 
@@ -98,7 +98,7 @@ Policies control which GitHub Actions workflows can access which secrets. Each p
 
 - **Repository pattern** — glob pattern matching repository names (e.g. `myorg/*`, `myorg/myrepo`)
 - **Ref pattern** — glob pattern matching git refs (e.g. `refs/heads/main`, `*`)
-- **Project + Environment** — which secrets the policy grants access to (selected from managed environments)
+- **Environment** — which secrets the policy grants access to (selected from managed environments, referenced by UUID)
 
 When a GitHub Actions workflow requests secrets, the server:
 1. Validates the OIDC token
