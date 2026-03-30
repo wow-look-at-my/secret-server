@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/wow-look-at-my/secret-server/internal/auth"
 	"github.com/wow-look-at-my/secret-server/internal/database"
 	"github.com/wow-look-at-my/secret-server/internal/templates"
@@ -41,9 +42,15 @@ func (h *UIHandler) Register(r chi.Router) {
 	r.Post(p+"/policies/{id}/delete", h.deletePolicyForm)
 	r.Get(p+"/environments", h.listEnvironments)
 	r.Get(p+"/environments/new", h.newEnvironment)
+	r.Get(p+"/environments/{id}/edit", h.editEnvironment)
 	r.Post(p+"/environments", h.createEnvironment)
+	r.Post(p+"/environments/{id}", h.updateEnvironment)
 	r.Post(p+"/environments/{id}/delete", h.deleteEnvironmentForm)
 	r.Get(p+"/audit", h.auditLog)
+	// Redirect /admin (no trailing slash) to /admin/
+	r.Get(p, func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, p+"/", http.StatusFound)
+	})
 	// Catch-all: redirect unknown /admin/* paths to /admin/
 	r.Get(p+"/*", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, p+"/", http.StatusFound)
@@ -62,20 +69,23 @@ func uiActor(r *http.Request) string {
 	return "unknown"
 }
 
-// resolveEnvID looks up an environment by ID and returns (project, environment).
-func (h *UIHandler) resolveEnvID(r *http.Request) (string, string, error) {
+// resolveEnvID looks up an environment by ID from the form and returns the ID.
+func (h *UIHandler) resolveEnvID(r *http.Request) (string, error) {
 	envID := r.FormValue("env_id")
 	if envID == "" {
-		return "", "", fmt.Errorf("environment is required")
+		return "", fmt.Errorf("environment is required")
+	}
+	if _, err := uuid.Parse(envID); err != nil {
+		return "", fmt.Errorf("invalid environment ID format")
 	}
 	env, err := h.db.GetEnvironment(envID)
 	if err != nil {
-		return "", "", fmt.Errorf("lookup environment: %w", err)
+		return "", fmt.Errorf("lookup environment: %w", err)
 	}
 	if env == nil {
-		return "", "", fmt.Errorf("selected environment not found")
+		return "", fmt.Errorf("selected environment not found")
 	}
-	return env.Project, env.Environment, nil
+	return envID, nil
 }
 
 func (h *UIHandler) dashboard(w http.ResponseWriter, r *http.Request) {
@@ -157,11 +167,12 @@ func (h *UIHandler) editSecret(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UIHandler) createSecret(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
-	project, environment, err := h.resolveEnvID(r)
+	envID, err := h.resolveEnvID(r)
 	if err != nil {
 		envs, _ := h.db.ListEnvironments()
 		h.tmpl.Render(w, r, "secret_form.html", map[string]any{
@@ -175,21 +186,25 @@ func (h *UIHandler) createSecret(w http.ResponseWriter, r *http.Request) {
 	secret, err := h.db.CreateSecret(
 		r.FormValue("key"),
 		r.FormValue("value"),
-		project,
-		environment,
+		envID,
 	)
 	if err != nil {
 		slog.Error("create secret failed", "error", err)
 		envs, _ := h.db.ListEnvironments()
 		h.tmpl.Render(w, r, "secret_form.html", map[string]any{
 			"IsNew":        true,
-			"Error":        "Failed to create secret: " + err.Error(),
+			"Error":        "Failed to create secret. Check server logs for details.",
 			"Form":         r.Form,
 			"Environments": envs,
 		})
 		return
 	}
 
+	env, _ := h.db.GetEnvironment(envID)
+	project, environment := "", ""
+	if env != nil {
+		project, environment = env.Project, env.Environment
+	}
 	details, _ := json.Marshal(map[string]string{"key": r.FormValue("key"), "project": project, "environment": environment})
 	if err := h.audit.CreateEntry("secret.create", "admin", uiActor(r), "secret", secret.ID, string(details)); err != nil {
 		slog.Error("audit log failed", "error", err)
@@ -199,6 +214,7 @@ func (h *UIHandler) createSecret(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UIHandler) updateSecret(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	id := chi.URLParam(r, "id")
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
@@ -218,13 +234,13 @@ func (h *UIHandler) updateSecret(w http.ResponseWriter, r *http.Request) {
 		}
 		value = existing.Value
 	}
-	project, environment, err := h.resolveEnvID(r)
+	envID, err := h.resolveEnvID(r)
 	if err != nil {
 		slog.Error("resolve env for secret update failed", "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	err = h.db.UpdateSecret(id, r.FormValue("key"), value, project, environment)
+	err = h.db.UpdateSecret(id, r.FormValue("key"), value, envID)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			http.NotFound(w, r)
@@ -235,6 +251,11 @@ func (h *UIHandler) updateSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	env, _ := h.db.GetEnvironment(envID)
+	project, environment := "", ""
+	if env != nil {
+		project, environment = env.Project, env.Environment
+	}
 	details, _ := json.Marshal(map[string]string{"key": r.FormValue("key"), "project": project, "environment": environment})
 	if err := h.audit.CreateEntry("secret.update", "admin", uiActor(r), "secret", id, string(details)); err != nil {
 		slog.Error("audit log failed", "error", err)
@@ -303,6 +324,7 @@ func (h *UIHandler) editPolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UIHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
@@ -311,7 +333,7 @@ func (h *UIHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
 	if refPattern == "" {
 		refPattern = "*"
 	}
-	project, environment, err := h.resolveEnvID(r)
+	envID, err := h.resolveEnvID(r)
 	if err != nil {
 		envs, _ := h.db.ListEnvironments()
 		h.tmpl.Render(w, r, "policy_form.html", map[string]any{
@@ -326,21 +348,25 @@ func (h *UIHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
 		r.FormValue("name"),
 		r.FormValue("repository_pattern"),
 		refPattern,
-		project,
-		environment,
+		envID,
 	)
 	if err != nil {
 		slog.Error("create policy failed", "error", err)
 		envs, _ := h.db.ListEnvironments()
 		h.tmpl.Render(w, r, "policy_form.html", map[string]any{
 			"IsNew":        true,
-			"Error":        "Failed to create policy: " + err.Error(),
+			"Error":        "Failed to create policy. Check server logs for details.",
 			"Form":         r.Form,
 			"Environments": envs,
 		})
 		return
 	}
 
+	env, _ := h.db.GetEnvironment(envID)
+	project, environment := "", ""
+	if env != nil {
+		project, environment = env.Project, env.Environment
+	}
 	details, _ := json.Marshal(map[string]string{"name": r.FormValue("name"), "repository_pattern": r.FormValue("repository_pattern"), "project": project, "environment": environment})
 	if err := h.audit.CreateEntry("policy.create", "admin", uiActor(r), "policy", policy.ID, string(details)); err != nil {
 		slog.Error("audit log failed", "error", err)
@@ -350,6 +376,7 @@ func (h *UIHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UIHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	id := chi.URLParam(r, "id")
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
@@ -359,13 +386,13 @@ func (h *UIHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 	if refPattern == "" {
 		refPattern = "*"
 	}
-	project, environment, err := h.resolveEnvID(r)
+	envID, err := h.resolveEnvID(r)
 	if err != nil {
 		slog.Error("resolve env for policy update failed", "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	err = h.db.UpdatePolicy(id, r.FormValue("name"), r.FormValue("repository_pattern"), refPattern, project, environment)
+	err = h.db.UpdatePolicy(id, r.FormValue("name"), r.FormValue("repository_pattern"), refPattern, envID)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			http.NotFound(w, r)
@@ -376,6 +403,11 @@ func (h *UIHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	env, _ := h.db.GetEnvironment(envID)
+	project, environment := "", ""
+	if env != nil {
+		project, environment = env.Project, env.Environment
+	}
 	details, _ := json.Marshal(map[string]string{"name": r.FormValue("name"), "repository_pattern": r.FormValue("repository_pattern"), "project": project, "environment": environment})
 	if err := h.audit.CreateEntry("policy.update", "admin", uiActor(r), "policy", id, string(details)); err != nil {
 		slog.Error("audit log failed", "error", err)
@@ -418,10 +450,31 @@ func (h *UIHandler) listEnvironments(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UIHandler) newEnvironment(w http.ResponseWriter, r *http.Request) {
-	h.tmpl.Render(w, r, "environment_form.html", map[string]any{})
+	h.tmpl.Render(w, r, "environment_form.html", map[string]any{
+		"IsNew": true,
+	})
+}
+
+func (h *UIHandler) editEnvironment(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	env, err := h.db.GetEnvironment(id)
+	if err != nil {
+		slog.Error("get environment failed", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	if env == nil {
+		http.NotFound(w, r)
+		return
+	}
+	h.tmpl.Render(w, r, "environment_form.html", map[string]any{
+		"IsNew":       false,
+		"Environment": env,
+	})
 }
 
 func (h *UIHandler) createEnvironment(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
@@ -430,6 +483,7 @@ func (h *UIHandler) createEnvironment(w http.ResponseWriter, r *http.Request) {
 	environment := r.FormValue("environment")
 	if project == "" || environment == "" {
 		h.tmpl.Render(w, r, "environment_form.html", map[string]any{
+			"IsNew": true,
 			"Error": "Project and environment are required.",
 			"Form":  r.Form,
 		})
@@ -439,7 +493,8 @@ func (h *UIHandler) createEnvironment(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.Error("create environment failed", "error", err)
 		h.tmpl.Render(w, r, "environment_form.html", map[string]any{
-			"Error": "Failed to create environment: " + err.Error(),
+			"IsNew": true,
+			"Error": "Failed to create environment. Check server logs for details.",
 			"Form":  r.Form,
 		})
 		return
@@ -447,6 +502,49 @@ func (h *UIHandler) createEnvironment(w http.ResponseWriter, r *http.Request) {
 
 	details, _ := json.Marshal(map[string]string{"project": project, "environment": environment})
 	if err := h.audit.CreateEntry("environment.create", "admin", uiActor(r), "environment", env.ID, string(details)); err != nil {
+		slog.Error("audit log failed", "error", err)
+	}
+
+	http.Redirect(w, r, AdminPrefix+"/environments", http.StatusSeeOther)
+}
+
+func (h *UIHandler) updateEnvironment(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+	id := chi.URLParam(r, "id")
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+	project := r.FormValue("project")
+	environment := r.FormValue("environment")
+	if project == "" || environment == "" {
+		env, _ := h.db.GetEnvironment(id)
+		h.tmpl.Render(w, r, "environment_form.html", map[string]any{
+			"IsNew":       false,
+			"Environment": env,
+			"Error":       "Project and environment are required.",
+			"Form":        r.Form,
+		})
+		return
+	}
+	if err := h.db.UpdateEnvironment(id, project, environment); err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		slog.Error("update environment failed", "error", err)
+		env, _ := h.db.GetEnvironment(id)
+		h.tmpl.Render(w, r, "environment_form.html", map[string]any{
+			"IsNew":       false,
+			"Environment": env,
+			"Error":       "Failed to update environment. Check server logs for details.",
+			"Form":        r.Form,
+		})
+		return
+	}
+
+	details, _ := json.Marshal(map[string]string{"project": project, "environment": environment})
+	if err := h.audit.CreateEntry("environment.update", "admin", uiActor(r), "environment", id, string(details)); err != nil {
 		slog.Error("audit log failed", "error", err)
 	}
 
@@ -466,7 +564,7 @@ func (h *UIHandler) deleteEnvironmentForm(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	inUse, err := h.db.EnvironmentInUse(env.Project, env.Environment)
+	inUse, err := h.db.EnvironmentInUse(id)
 	if err != nil {
 		slog.Error("check environment in use failed", "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)

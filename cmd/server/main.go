@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"runtime/debug"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	gorillacsrf "github.com/gorilla/csrf"
@@ -15,6 +16,33 @@ import (
 	"github.com/wow-look-at-my/secret-server/internal/handlers"
 	"github.com/wow-look-at-my/secret-server/internal/templates"
 )
+
+// securityHeaders sets common security headers on every response.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// uiSecurityHeaders adds Content-Security-Policy for HTML pages served under
+// the admin UI prefix.
+func uiSecurityHeaders(next http.Handler) http.Handler {
+	csp := strings.Join([]string{
+		"default-src 'none'",
+		"script-src 'unsafe-inline'",
+		"style-src 'unsafe-inline'",
+		"frame-ancestors 'none'",
+	}, "; ")
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy", csp)
+		next.ServeHTTP(w, r)
+	})
+}
 
 func main() {
 	cfg, err := config.Load()
@@ -95,6 +123,7 @@ func buildMux(db *database.DB, auditDB *database.AuditDB, cfg *config.Config) (c
 	cfValidator := auth.NewCloudflareAccessValidator(cfg.CFAccessTeamDomain, cfg.CFAccessAdminAudience)
 
 	r := chi.NewRouter()
+	r.Use(securityHeaders)
 
 	// Public API — GitHub OIDC auth (no CF Access, no CSRF)
 	publicHandler := handlers.NewPublicHandler(db, auditDB, oidcValidator)
@@ -125,6 +154,7 @@ func buildMux(db *database.DB, auditDB *database.AuditDB, cfg *config.Config) (c
 	r.Group(func(r chi.Router) {
 		r.Use(cfValidator.RequireCFAccess)
 		r.Use(csrfMiddleware)
+		r.Use(uiSecurityHeaders)
 		uiHandler.Register(r)
 	})
 

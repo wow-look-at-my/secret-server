@@ -1,16 +1,16 @@
 {{template "head" .}}
-{{define "title"}}New Environment - Secret Server{{end}}
+{{define "title"}}{{if .IsNew}}New Environment{{else}}Edit Environment{{end}} - Secret Server{{end}}
 
-<h1>New Environment</h1>
+<h1>{{if .IsNew}}New Environment{{else}}Edit Environment{{end}}</h1>
 
 {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
 
-<form method="post" action="{{prefix}}/environments">
+<form method="post" action="{{if .IsNew}}{{prefix}}/environments{{else}}{{prefix}}/environments/{{.Environment.ID}}{{end}}">
     {{with csrfToken}}<input type="hidden" name="csrf_token" value="{{.}}">{{end}}
     <div class="form-group">
         <label for="project">Project</label>
         <input type="text" id="project" name="project" required
-            value="{{if .Form}}{{index .Form "project" 0}}{{end}}"
+            value="{{if .Form}}{{index .Form "project" 0}}{{else if not .IsNew}}{{.Environment.Project}}{{end}}"
             placeholder="e.g. myapp">
         <div class="hint">The application or service name. Groups related secrets together.</div>
     </div>
@@ -18,13 +18,13 @@
     <div class="form-group">
         <label for="environment">Environment</label>
         <input type="text" id="environment" name="environment" required
-            value="{{if .Form}}{{index .Form "environment" 0}}{{end}}"
+            value="{{if .Form}}{{index .Form "environment" 0}}{{else if not .IsNew}}{{.Environment.Environment}}{{end}}"
             placeholder="e.g. prod">
         <div class="hint">Deployment stage (e.g. prod, staging, dev). Each project can have multiple environments.</div>
     </div>
 
     <div class="actions">
-        <button type="submit" class="btn btn-primary">Create</button>
+        <button type="submit" class="btn btn-primary">{{if .IsNew}}Create{{else}}Update{{end}}</button>
         <a href="{{prefix}}/environments" class="btn">Cancel</a>
     </div>
 </form>

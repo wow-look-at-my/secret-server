@@ -36,8 +36,9 @@ func TestPublicFetchSecretsNoToken(t *testing.T) {
 func TestPublicFetchSecretsWithPolicy(t *testing.T) {
 	env := setup(t)
 
-	env.db.CreateSecret("DB_URL", "postgres://localhost", "myapp", "prod")
-	env.db.CreatePolicy("allow", "myorg/*", "*", "myapp", "prod")
+	envID := env.envID(t, "myapp", "prod")
+	env.db.CreateSecret("DB_URL", "postgres://localhost", envID)
+	env.db.CreatePolicy("allow", "myorg/*", "*", envID)
 
 	h := NewPublicHandler(env.db, env.audit, env.oidc)
 	mux := chi.NewRouter()
@@ -67,8 +68,9 @@ func TestPublicFetchSecretsWithPolicy(t *testing.T) {
 
 func TestPublicFetchSecretsNoMatchingPolicy(t *testing.T) {
 	env := setup(t)
-	env.db.CreateSecret("KEY", "val", "app", "prod")
-	env.db.CreatePolicy("other", "otherorg/*", "*", "app", "prod")
+	envID := env.envID(t, "app", "prod")
+	env.db.CreateSecret("KEY", "val", envID)
+	env.db.CreatePolicy("other", "otherorg/*", "*", envID)
 
 	h := NewPublicHandler(env.db, env.audit, env.oidc)
 	mux := chi.NewRouter()
@@ -142,10 +144,11 @@ func TestPublicFetchSecretsPolicyDBError(t *testing.T) {
 func TestPublicFetchSecretsMultiplePoliciesSameProjectEnv(t *testing.T) {
 	env := setup(t)
 
-	env.db.CreateSecret("KEY1", "val1", "app", "prod")
-	env.db.CreateSecret("KEY2", "val2", "app", "prod")
-	env.db.CreatePolicy("p1", "myorg/*", "*", "app", "prod")
-	env.db.CreatePolicy("p2", "myorg/*", "refs/heads/*", "app", "prod")
+	envID := env.envID(t, "app", "prod")
+	env.db.CreateSecret("KEY1", "val1", envID)
+	env.db.CreateSecret("KEY2", "val2", envID)
+	env.db.CreatePolicy("p1", "myorg/*", "*", envID)
+	env.db.CreatePolicy("p2", "myorg/*", "refs/heads/*", envID)
 
 	h := NewPublicHandler(env.db, env.audit, env.oidc)
 	mux := chi.NewRouter()
@@ -168,10 +171,12 @@ func TestPublicFetchSecretsMultiplePoliciesSameProjectEnv(t *testing.T) {
 func TestPublicFetchSecretsMultipleProjectEnvs(t *testing.T) {
 	env := setup(t)
 
-	env.db.CreateSecret("KEY_A", "a", "app", "prod")
-	env.db.CreateSecret("KEY_B", "b", "app", "staging")
-	env.db.CreatePolicy("p1", "myorg/*", "*", "app", "prod")
-	env.db.CreatePolicy("p2", "myorg/*", "*", "app", "staging")
+	envProd := env.envID(t, "app", "prod")
+	envStaging := env.envID(t, "app", "staging")
+	env.db.CreateSecret("KEY_A", "a", envProd)
+	env.db.CreateSecret("KEY_B", "b", envStaging)
+	env.db.CreatePolicy("p1", "myorg/*", "*", envProd)
+	env.db.CreatePolicy("p2", "myorg/*", "*", envStaging)
 
 	h := NewPublicHandler(env.db, env.audit, env.oidc)
 	mux := chi.NewRouter()
