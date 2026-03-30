@@ -20,22 +20,24 @@ func setupTestDB(t *testing.T) *sqlcdb.Queries {
 	t.Cleanup(func() { db.Close() })
 
 	_, err = db.Exec(`
-		CREATE TABLE secrets (
-			id TEXT PRIMARY KEY, key TEXT NOT NULL, value BLOB NOT NULL,
-			project TEXT NOT NULL, environment TEXT NOT NULL,
-			created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL,
-			UNIQUE(key, project, environment)
-		);
-		CREATE TABLE access_policies (
-			id TEXT PRIMARY KEY, name TEXT NOT NULL,
-			repository_pattern TEXT NOT NULL, ref_pattern TEXT NOT NULL DEFAULT '*',
-			project TEXT NOT NULL, environment TEXT NOT NULL,
-			created_at DATETIME NOT NULL
-		);
 		CREATE TABLE environments (
 			id TEXT PRIMARY KEY, project TEXT NOT NULL, environment TEXT NOT NULL,
 			created_at DATETIME NOT NULL, UNIQUE(project, environment)
 		);
+		CREATE TABLE secrets (
+			id TEXT PRIMARY KEY, key TEXT NOT NULL, value BLOB NOT NULL,
+			environment_id TEXT NOT NULL REFERENCES environments(id),
+			created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL,
+			UNIQUE(key, environment_id)
+		);
+		CREATE TABLE access_policies (
+			id TEXT PRIMARY KEY, name TEXT NOT NULL,
+			repository_pattern TEXT NOT NULL, ref_pattern TEXT NOT NULL DEFAULT '*',
+			environment_id TEXT NOT NULL REFERENCES environments(id),
+			created_at DATETIME NOT NULL
+		);
+		CREATE INDEX idx_secrets_env_id ON secrets(environment_id);
+		CREATE INDEX idx_policies_env_id ON access_policies(environment_id);
 		CREATE TABLE audit_log (
 			id TEXT PRIMARY KEY, timestamp DATETIME NOT NULL,
 			action TEXT NOT NULL, actor_type TEXT NOT NULL, actor_id TEXT NOT NULL,
@@ -47,27 +49,41 @@ func setupTestDB(t *testing.T) *sqlcdb.Queries {
 	return sqlcdb.New(db)
 }
 
+// createEnv is a test helper to create an environment and return its ID.
+func createEnv(t *testing.T, q *sqlcdb.Queries, id, project, env string) {
+	t.Helper()
+	err := q.CreateEnvironment(context.Background(), sqlcdb.CreateEnvironmentParams{
+		ID: id, Project: project, Environment: env, CreatedAt: time.Now().UTC(),
+	})
+	require.Nil(t, err)
+}
+
 func TestSecretQueries(t *testing.T) {
 	q := setupTestDB(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	// Create
+	// Create environments first (FK requirement)
+	createEnv(t, q, "env-proj-prod", "proj", "prod")
+	createEnv(t, q, "env-proj-dev", "proj", "dev")
+	createEnv(t, q, "env-other-prod", "other", "prod")
+
+	// Create secrets
 	err := q.CreateSecret(ctx, sqlcdb.CreateSecretParams{
 		ID: "s1", Key: "KEY_A", Value: []byte("enc1"),
-		Project: "proj", Environment: "prod", CreatedAt: now, UpdatedAt: now,
+		EnvironmentID: "env-proj-prod", CreatedAt: now, UpdatedAt: now,
 	})
 	require.Nil(t, err)
 
 	err = q.CreateSecret(ctx, sqlcdb.CreateSecretParams{
 		ID: "s2", Key: "KEY_B", Value: []byte("enc2"),
-		Project: "proj", Environment: "dev", CreatedAt: now, UpdatedAt: now,
+		EnvironmentID: "env-proj-dev", CreatedAt: now, UpdatedAt: now,
 	})
 	require.Nil(t, err)
 
 	err = q.CreateSecret(ctx, sqlcdb.CreateSecretParams{
 		ID: "s3", Key: "KEY_C", Value: []byte("enc3"),
-		Project: "other", Environment: "prod", CreatedAt: now, UpdatedAt: now,
+		EnvironmentID: "env-other-prod", CreatedAt: now, UpdatedAt: now,
 	})
 	require.Nil(t, err)
 
@@ -75,6 +91,9 @@ func TestSecretQueries(t *testing.T) {
 	s, err := q.GetSecret(ctx, "s1")
 	require.Nil(t, err)
 	assert.Equal(t, "KEY_A", s.Key)
+	assert.Equal(t, "proj", s.Project)
+	assert.Equal(t, "prod", s.Environment)
+	assert.Equal(t, "env-proj-prod", s.EnvironmentID)
 
 	// ListSecretsAll
 	all, err := q.ListSecretsAll(ctx)
@@ -98,18 +117,16 @@ func TestSecretQueries(t *testing.T) {
 	require.Nil(t, err)
 	assert.Equal(t, 1, len(byBoth))
 
-	// GetSecretsByProjectEnv
-	kv, err := q.GetSecretsByProjectEnv(ctx, sqlcdb.GetSecretsByProjectEnvParams{
-		Project: "proj", Environment: "prod",
-	})
+	// GetSecretsByEnvironmentID
+	kv, err := q.GetSecretsByEnvironmentID(ctx, "env-proj-prod")
 	require.Nil(t, err)
 	assert.Equal(t, 1, len(kv))
 	assert.Equal(t, "KEY_A", kv[0].Key)
 
 	// Update
 	result, err := q.UpdateSecret(ctx, sqlcdb.UpdateSecretParams{
-		Key: "KEY_A", Value: []byte("updated"), Project: "proj",
-		Environment: "prod", UpdatedAt: now, ID: "s1",
+		Key: "KEY_A", Value: []byte("updated"),
+		EnvironmentID: "env-proj-prod", UpdatedAt: now, ID: "s1",
 	})
 	require.Nil(t, err)
 	n, _ := result.RowsAffected()
@@ -150,13 +167,7 @@ func TestEnvironmentQueries(t *testing.T) {
 	require.Nil(t, err)
 	assert.Equal(t, 1, len(envs))
 
-	count, err := q.EnvironmentExists(ctx, sqlcdb.EnvironmentExistsParams{
-		Project: "proj", Environment: "prod",
-	})
-	require.Nil(t, err)
-	assert.Equal(t, int64(1), count)
-
-	count, err = q.CountEnvironments(ctx)
+	count, err := q.CountEnvironments(ctx)
 	require.Nil(t, err)
 	assert.Equal(t, int64(1), count)
 
@@ -166,29 +177,37 @@ func TestEnvironmentQueries(t *testing.T) {
 	})
 	require.Nil(t, err)
 
-	// SeedEnvironmentPairs (empty tables)
-	pairs, err := q.SeedEnvironmentPairs(ctx)
+	// Verify no duplicate was created
+	envs, err = q.ListEnvironments(ctx)
 	require.Nil(t, err)
-	assert.Equal(t, 0, len(pairs))
+	assert.Equal(t, 1, len(envs))
 
-	// EnvironmentInUseSecrets
-	count, err = q.EnvironmentInUseSecrets(ctx, sqlcdb.EnvironmentInUseSecretsParams{
-		Project: "proj", Environment: "prod",
+	// UpdateEnvironment
+	result, err := q.UpdateEnvironment(ctx, sqlcdb.UpdateEnvironmentParams{
+		Project: "proj-renamed", Environment: "production", ID: "e1",
 	})
+	require.Nil(t, err)
+	n, _ := result.RowsAffected()
+	assert.Equal(t, int64(1), n)
+
+	env, err = q.GetEnvironment(ctx, "e1")
+	require.Nil(t, err)
+	assert.Equal(t, "proj-renamed", env.Project)
+
+	// EnvironmentInUseSecrets (no secrets yet)
+	count, err = q.EnvironmentInUseSecrets(ctx, "e1")
 	require.Nil(t, err)
 	assert.Equal(t, int64(0), count)
 
-	// EnvironmentInUsePolicies
-	count, err = q.EnvironmentInUsePolicies(ctx, sqlcdb.EnvironmentInUsePoliciesParams{
-		Project: "proj", Environment: "prod",
-	})
+	// EnvironmentInUsePolicies (no policies yet)
+	count, err = q.EnvironmentInUsePolicies(ctx, "e1")
 	require.Nil(t, err)
 	assert.Equal(t, int64(0), count)
 
 	// Delete
-	result, err := q.DeleteEnvironment(ctx, "e1")
+	delResult, err := q.DeleteEnvironment(ctx, "e1")
 	require.Nil(t, err)
-	n, _ := result.RowsAffected()
+	n, _ = delResult.RowsAffected()
 	assert.Equal(t, int64(1), n)
 }
 
@@ -197,9 +216,12 @@ func TestPolicyQueries(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
+	// Create environment first (FK requirement)
+	createEnv(t, q, "env-1", "proj", "prod")
+
 	err := q.CreatePolicy(ctx, sqlcdb.CreatePolicyParams{
 		ID: "p1", Name: "Allow prod", RepositoryPattern: "org/*",
-		RefPattern: "refs/heads/main", Project: "proj", Environment: "prod",
+		RefPattern: "refs/heads/main", EnvironmentID: "env-1",
 		CreatedAt: now,
 	})
 	require.Nil(t, err)
@@ -207,6 +229,9 @@ func TestPolicyQueries(t *testing.T) {
 	p, err := q.GetPolicy(ctx, "p1")
 	require.Nil(t, err)
 	assert.Equal(t, "Allow prod", p.Name)
+	assert.Equal(t, "proj", p.Project)
+	assert.Equal(t, "prod", p.Environment)
+	assert.Equal(t, "env-1", p.EnvironmentID)
 
 	policies, err := q.ListPolicies(ctx)
 	require.Nil(t, err)
@@ -218,7 +243,7 @@ func TestPolicyQueries(t *testing.T) {
 
 	result, err := q.UpdatePolicy(ctx, sqlcdb.UpdatePolicyParams{
 		Name: "Updated", RepositoryPattern: "other/*", RefPattern: "*",
-		Project: "proj", Environment: "prod", ID: "p1",
+		EnvironmentID: "env-1", ID: "p1",
 	})
 	require.Nil(t, err)
 	n, _ := result.RowsAffected()

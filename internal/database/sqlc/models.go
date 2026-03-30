@@ -13,8 +13,7 @@ type AccessPolicy struct {
 	Name              string
 	RepositoryPattern string
 	RefPattern        string
-	Project           string
-	Environment       string
+	EnvironmentID     string
 	CreatedAt         time.Time
 }
 
@@ -37,11 +36,10 @@ type Environment struct {
 }
 
 type Secret struct {
-	ID          string
-	Key         string
-	Value       []byte
-	Project     string
-	Environment string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID            string
+	Key           string
+	Value         []byte
+	EnvironmentID string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }

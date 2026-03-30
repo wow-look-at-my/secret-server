@@ -23,18 +23,17 @@ func (q *Queries) CountSecrets(ctx context.Context) (int64, error) {
 }
 
 const createSecret = `-- name: CreateSecret :exec
-INSERT INTO secrets (id, key, value, project, environment, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO secrets (id, key, value, environment_id, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?)
 `
 
 type CreateSecretParams struct {
-	ID          string
-	Key         string
-	Value       []byte
-	Project     string
-	Environment string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID            string
+	Key           string
+	Value         []byte
+	EnvironmentID string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 func (q *Queries) CreateSecret(ctx context.Context, arg CreateSecretParams) error {
@@ -42,8 +41,7 @@ func (q *Queries) CreateSecret(ctx context.Context, arg CreateSecretParams) erro
 		arg.ID,
 		arg.Key,
 		arg.Value,
-		arg.Project,
-		arg.Environment,
+		arg.EnvironmentID,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -59,17 +57,31 @@ func (q *Queries) DeleteSecret(ctx context.Context, id string) (sql.Result, erro
 }
 
 const getSecret = `-- name: GetSecret :one
-SELECT id, key, value, project, environment, created_at, updated_at
-FROM secrets WHERE id = ?
+SELECT s.id, s.key, s.value, s.environment_id, e.project, e.environment, s.created_at, s.updated_at
+FROM secrets s
+JOIN environments e ON e.id = s.environment_id
+WHERE s.id = ?
 `
 
-func (q *Queries) GetSecret(ctx context.Context, id string) (Secret, error) {
+type GetSecretRow struct {
+	ID            string
+	Key           string
+	Value         []byte
+	EnvironmentID string
+	Project       string
+	Environment   string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+func (q *Queries) GetSecret(ctx context.Context, id string) (GetSecretRow, error) {
 	row := q.db.QueryRowContext(ctx, getSecret, id)
-	var i Secret
+	var i GetSecretRow
 	err := row.Scan(
 		&i.ID,
 		&i.Key,
 		&i.Value,
+		&i.EnvironmentID,
 		&i.Project,
 		&i.Environment,
 		&i.CreatedAt,
@@ -78,29 +90,24 @@ func (q *Queries) GetSecret(ctx context.Context, id string) (Secret, error) {
 	return i, err
 }
 
-const getSecretsByProjectEnv = `-- name: GetSecretsByProjectEnv :many
-SELECT key, value FROM secrets WHERE project = ? AND environment = ?
+const getSecretsByEnvironmentID = `-- name: GetSecretsByEnvironmentID :many
+SELECT key, value FROM secrets WHERE environment_id = ?
 `
 
-type GetSecretsByProjectEnvParams struct {
-	Project     string
-	Environment string
-}
-
-type GetSecretsByProjectEnvRow struct {
+type GetSecretsByEnvironmentIDRow struct {
 	Key   string
 	Value []byte
 }
 
-func (q *Queries) GetSecretsByProjectEnv(ctx context.Context, arg GetSecretsByProjectEnvParams) ([]GetSecretsByProjectEnvRow, error) {
-	rows, err := q.db.QueryContext(ctx, getSecretsByProjectEnv, arg.Project, arg.Environment)
+func (q *Queries) GetSecretsByEnvironmentID(ctx context.Context, environmentID string) ([]GetSecretsByEnvironmentIDRow, error) {
+	rows, err := q.db.QueryContext(ctx, getSecretsByEnvironmentID, environmentID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []GetSecretsByProjectEnvRow
+	var items []GetSecretsByEnvironmentIDRow
 	for rows.Next() {
-		var i GetSecretsByProjectEnvRow
+		var i GetSecretsByEnvironmentIDRow
 		if err := rows.Scan(&i.Key, &i.Value); err != nil {
 			return nil, err
 		}
@@ -116,17 +123,20 @@ func (q *Queries) GetSecretsByProjectEnv(ctx context.Context, arg GetSecretsByPr
 }
 
 const listSecretsAll = `-- name: ListSecretsAll :many
-SELECT id, key, project, environment, created_at, updated_at
-FROM secrets ORDER BY project, environment, key
+SELECT s.id, s.key, s.environment_id, e.project, e.environment, s.created_at, s.updated_at
+FROM secrets s
+JOIN environments e ON e.id = s.environment_id
+ORDER BY e.project, e.environment, s.key
 `
 
 type ListSecretsAllRow struct {
-	ID          string
-	Key         string
-	Project     string
-	Environment string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID            string
+	Key           string
+	EnvironmentID string
+	Project       string
+	Environment   string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 func (q *Queries) ListSecretsAll(ctx context.Context) ([]ListSecretsAllRow, error) {
@@ -141,6 +151,7 @@ func (q *Queries) ListSecretsAll(ctx context.Context) ([]ListSecretsAllRow, erro
 		if err := rows.Scan(
 			&i.ID,
 			&i.Key,
+			&i.EnvironmentID,
 			&i.Project,
 			&i.Environment,
 			&i.CreatedAt,
@@ -160,17 +171,21 @@ func (q *Queries) ListSecretsAll(ctx context.Context) ([]ListSecretsAllRow, erro
 }
 
 const listSecretsByEnv = `-- name: ListSecretsByEnv :many
-SELECT id, key, project, environment, created_at, updated_at
-FROM secrets WHERE environment = ? ORDER BY project, environment, key
+SELECT s.id, s.key, s.environment_id, e.project, e.environment, s.created_at, s.updated_at
+FROM secrets s
+JOIN environments e ON e.id = s.environment_id
+WHERE e.environment = ?
+ORDER BY e.project, e.environment, s.key
 `
 
 type ListSecretsByEnvRow struct {
-	ID          string
-	Key         string
-	Project     string
-	Environment string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID            string
+	Key           string
+	EnvironmentID string
+	Project       string
+	Environment   string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 func (q *Queries) ListSecretsByEnv(ctx context.Context, environment string) ([]ListSecretsByEnvRow, error) {
@@ -185,6 +200,7 @@ func (q *Queries) ListSecretsByEnv(ctx context.Context, environment string) ([]L
 		if err := rows.Scan(
 			&i.ID,
 			&i.Key,
+			&i.EnvironmentID,
 			&i.Project,
 			&i.Environment,
 			&i.CreatedAt,
@@ -204,17 +220,21 @@ func (q *Queries) ListSecretsByEnv(ctx context.Context, environment string) ([]L
 }
 
 const listSecretsByProject = `-- name: ListSecretsByProject :many
-SELECT id, key, project, environment, created_at, updated_at
-FROM secrets WHERE project = ? ORDER BY project, environment, key
+SELECT s.id, s.key, s.environment_id, e.project, e.environment, s.created_at, s.updated_at
+FROM secrets s
+JOIN environments e ON e.id = s.environment_id
+WHERE e.project = ?
+ORDER BY e.project, e.environment, s.key
 `
 
 type ListSecretsByProjectRow struct {
-	ID          string
-	Key         string
-	Project     string
-	Environment string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID            string
+	Key           string
+	EnvironmentID string
+	Project       string
+	Environment   string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 func (q *Queries) ListSecretsByProject(ctx context.Context, project string) ([]ListSecretsByProjectRow, error) {
@@ -229,6 +249,7 @@ func (q *Queries) ListSecretsByProject(ctx context.Context, project string) ([]L
 		if err := rows.Scan(
 			&i.ID,
 			&i.Key,
+			&i.EnvironmentID,
 			&i.Project,
 			&i.Environment,
 			&i.CreatedAt,
@@ -248,9 +269,11 @@ func (q *Queries) ListSecretsByProject(ctx context.Context, project string) ([]L
 }
 
 const listSecretsByProjectAndEnv = `-- name: ListSecretsByProjectAndEnv :many
-SELECT id, key, project, environment, created_at, updated_at
-FROM secrets WHERE project = ? AND environment = ?
-ORDER BY project, environment, key
+SELECT s.id, s.key, s.environment_id, e.project, e.environment, s.created_at, s.updated_at
+FROM secrets s
+JOIN environments e ON e.id = s.environment_id
+WHERE e.project = ? AND e.environment = ?
+ORDER BY e.project, e.environment, s.key
 `
 
 type ListSecretsByProjectAndEnvParams struct {
@@ -259,12 +282,13 @@ type ListSecretsByProjectAndEnvParams struct {
 }
 
 type ListSecretsByProjectAndEnvRow struct {
-	ID          string
-	Key         string
-	Project     string
-	Environment string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID            string
+	Key           string
+	EnvironmentID string
+	Project       string
+	Environment   string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 func (q *Queries) ListSecretsByProjectAndEnv(ctx context.Context, arg ListSecretsByProjectAndEnvParams) ([]ListSecretsByProjectAndEnvRow, error) {
@@ -279,6 +303,7 @@ func (q *Queries) ListSecretsByProjectAndEnv(ctx context.Context, arg ListSecret
 		if err := rows.Scan(
 			&i.ID,
 			&i.Key,
+			&i.EnvironmentID,
 			&i.Project,
 			&i.Environment,
 			&i.CreatedAt,
@@ -298,8 +323,11 @@ func (q *Queries) ListSecretsByProjectAndEnv(ctx context.Context, arg ListSecret
 }
 
 const secretCountsByProjectEnv = `-- name: SecretCountsByProjectEnv :many
-SELECT project, environment, COUNT(*) AS secret_count
-FROM secrets GROUP BY project, environment ORDER BY project, environment
+SELECT e.project, e.environment, COUNT(*) AS secret_count
+FROM secrets s
+JOIN environments e ON e.id = s.environment_id
+GROUP BY e.project, e.environment
+ORDER BY e.project, e.environment
 `
 
 type SecretCountsByProjectEnvRow struct {
@@ -332,25 +360,23 @@ func (q *Queries) SecretCountsByProjectEnv(ctx context.Context) ([]SecretCountsB
 }
 
 const updateSecret = `-- name: UpdateSecret :execresult
-UPDATE secrets SET key = ?, value = ?, project = ?, environment = ?, updated_at = ?
+UPDATE secrets SET key = ?, value = ?, environment_id = ?, updated_at = ?
 WHERE id = ?
 `
 
 type UpdateSecretParams struct {
-	Key         string
-	Value       []byte
-	Project     string
-	Environment string
-	UpdatedAt   time.Time
-	ID          string
+	Key           string
+	Value         []byte
+	EnvironmentID string
+	UpdatedAt     time.Time
+	ID            string
 }
 
 func (q *Queries) UpdateSecret(ctx context.Context, arg UpdateSecretParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, updateSecret,
 		arg.Key,
 		arg.Value,
-		arg.Project,
-		arg.Environment,
+		arg.EnvironmentID,
 		arg.UpdatedAt,
 		arg.ID,
 	)

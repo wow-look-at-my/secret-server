@@ -15,17 +15,13 @@ type Policy struct {
 	Name              string
 	RepositoryPattern string
 	RefPattern        string
-	Project           string
-	Environment       string
+	EnvironmentID     string
+	Project           string // derived via JOIN with environments
+	Environment       string // derived via JOIN with environments
 	CreatedAt         time.Time
 }
 
-func (d *DB) CreatePolicy(name, repoPattern, refPattern, project, environment string) (*Policy, error) {
-	if ok, err := d.EnvironmentExists(project, environment); err != nil {
-		return nil, fmt.Errorf("validate environment: %w", err)
-	} else if !ok {
-		return nil, ErrInvalidEnvironment
-	}
+func (d *DB) CreatePolicy(name, repoPattern, refPattern, environmentID string) (*Policy, error) {
 	id := uuid.New().String()
 	now := time.Now().UTC()
 	err := d.q.CreatePolicy(context.Background(), sqlcdb.CreatePolicyParams{
@@ -33,8 +29,7 @@ func (d *DB) CreatePolicy(name, repoPattern, refPattern, project, environment st
 		Name:              name,
 		RepositoryPattern: repoPattern,
 		RefPattern:        refPattern,
-		Project:           project,
-		Environment:       environment,
+		EnvironmentID:     environmentID,
 		CreatedAt:         now,
 	})
 	if err != nil {
@@ -42,7 +37,7 @@ func (d *DB) CreatePolicy(name, repoPattern, refPattern, project, environment st
 	}
 	return &Policy{
 		ID: id, Name: name, RepositoryPattern: repoPattern,
-		RefPattern: refPattern, Project: project, Environment: environment, CreatedAt: now,
+		RefPattern: refPattern, EnvironmentID: environmentID, CreatedAt: now,
 	}, nil
 }
 
@@ -59,6 +54,7 @@ func (d *DB) GetPolicy(id string) (*Policy, error) {
 		Name:              row.Name,
 		RepositoryPattern: row.RepositoryPattern,
 		RefPattern:        row.RefPattern,
+		EnvironmentID:     row.EnvironmentID,
 		Project:           row.Project,
 		Environment:       row.Environment,
 		CreatedAt:         row.CreatedAt,
@@ -77,6 +73,7 @@ func (d *DB) ListPolicies() ([]Policy, error) {
 			Name:              r.Name,
 			RepositoryPattern: r.RepositoryPattern,
 			RefPattern:        r.RefPattern,
+			EnvironmentID:     r.EnvironmentID,
 			Project:           r.Project,
 			Environment:       r.Environment,
 			CreatedAt:         r.CreatedAt,
@@ -85,18 +82,12 @@ func (d *DB) ListPolicies() ([]Policy, error) {
 	return policies, nil
 }
 
-func (d *DB) UpdatePolicy(id, name, repoPattern, refPattern, project, environment string) error {
-	if ok, err := d.EnvironmentExists(project, environment); err != nil {
-		return fmt.Errorf("validate environment: %w", err)
-	} else if !ok {
-		return ErrInvalidEnvironment
-	}
+func (d *DB) UpdatePolicy(id, name, repoPattern, refPattern, environmentID string) error {
 	result, err := d.q.UpdatePolicy(context.Background(), sqlcdb.UpdatePolicyParams{
 		Name:              name,
 		RepositoryPattern: repoPattern,
 		RefPattern:        refPattern,
-		Project:           project,
-		Environment:       environment,
+		EnvironmentID:     environmentID,
 		ID:                id,
 	})
 	if err != nil {

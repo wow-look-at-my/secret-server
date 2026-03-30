@@ -12,13 +12,14 @@ import (
 )
 
 type Secret struct {
-	ID          string
-	Key         string
-	Value       string // plaintext — only populated on read
-	Project     string
-	Environment string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID            string
+	Key           string
+	Value         string // plaintext — only populated on read
+	EnvironmentID string
+	Project       string // derived via JOIN with environments
+	Environment   string // derived via JOIN with environments
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 func (d *DB) encryptValue(plaintext string) ([]byte, error) {
@@ -42,12 +43,7 @@ func (d *DB) decryptValue(enc []byte) (string, error) {
 	return string(plaintext), nil
 }
 
-func (d *DB) CreateSecret(key, value, project, environment string) (*Secret, error) {
-	if ok, err := d.EnvironmentExists(project, environment); err != nil {
-		return nil, fmt.Errorf("validate environment: %w", err)
-	} else if !ok {
-		return nil, ErrInvalidEnvironment
-	}
+func (d *DB) CreateSecret(key, value, environmentID string) (*Secret, error) {
 	id := uuid.New().String()
 	enc, err := d.encryptValue(value)
 	if err != nil {
@@ -55,18 +51,17 @@ func (d *DB) CreateSecret(key, value, project, environment string) (*Secret, err
 	}
 	now := time.Now().UTC()
 	err = d.q.CreateSecret(context.Background(), sqlcdb.CreateSecretParams{
-		ID:          id,
-		Key:         key,
-		Value:       enc,
-		Project:     project,
-		Environment: environment,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:            id,
+		Key:           key,
+		Value:         enc,
+		EnvironmentID: environmentID,
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("insert secret: %w", err)
 	}
-	return &Secret{ID: id, Key: key, Project: project, Environment: environment, CreatedAt: now, UpdatedAt: now}, nil
+	return &Secret{ID: id, Key: key, EnvironmentID: environmentID, CreatedAt: now, UpdatedAt: now}, nil
 }
 
 func (d *DB) GetSecret(id string) (*Secret, error) {
@@ -82,23 +77,25 @@ func (d *DB) GetSecret(id string) (*Secret, error) {
 		return nil, err
 	}
 	return &Secret{
-		ID:          row.ID,
-		Key:         row.Key,
-		Value:       plaintext,
-		Project:     row.Project,
-		Environment: row.Environment,
-		CreatedAt:   row.CreatedAt,
-		UpdatedAt:   row.UpdatedAt,
+		ID:            row.ID,
+		Key:           row.Key,
+		Value:         plaintext,
+		EnvironmentID: row.EnvironmentID,
+		Project:       row.Project,
+		Environment:   row.Environment,
+		CreatedAt:     row.CreatedAt,
+		UpdatedAt:     row.UpdatedAt,
 	}, nil
 }
 
 type SecretListItem struct {
-	ID          string
-	Key         string
-	Project     string
-	Environment string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID            string
+	Key           string
+	EnvironmentID string
+	Project       string
+	Environment   string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 func (d *DB) ListSecrets(project, environment string) ([]SecretListItem, error) {
@@ -114,7 +111,7 @@ func (d *DB) ListSecrets(project, environment string) ([]SecretListItem, error) 
 		}
 		secrets := make([]SecretListItem, len(rows))
 		for i, r := range rows {
-			secrets[i] = SecretListItem{ID: r.ID, Key: r.Key, Project: r.Project, Environment: r.Environment, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+			secrets[i] = SecretListItem{ID: r.ID, Key: r.Key, EnvironmentID: r.EnvironmentID, Project: r.Project, Environment: r.Environment, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 		}
 		return secrets, nil
 	case project != "":
@@ -124,7 +121,7 @@ func (d *DB) ListSecrets(project, environment string) ([]SecretListItem, error) 
 		}
 		secrets := make([]SecretListItem, len(rows))
 		for i, r := range rows {
-			secrets[i] = SecretListItem{ID: r.ID, Key: r.Key, Project: r.Project, Environment: r.Environment, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+			secrets[i] = SecretListItem{ID: r.ID, Key: r.Key, EnvironmentID: r.EnvironmentID, Project: r.Project, Environment: r.Environment, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 		}
 		return secrets, nil
 	case environment != "":
@@ -134,7 +131,7 @@ func (d *DB) ListSecrets(project, environment string) ([]SecretListItem, error) 
 		}
 		secrets := make([]SecretListItem, len(rows))
 		for i, r := range rows {
-			secrets[i] = SecretListItem{ID: r.ID, Key: r.Key, Project: r.Project, Environment: r.Environment, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+			secrets[i] = SecretListItem{ID: r.ID, Key: r.Key, EnvironmentID: r.EnvironmentID, Project: r.Project, Environment: r.Environment, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 		}
 		return secrets, nil
 	default:
@@ -144,29 +141,23 @@ func (d *DB) ListSecrets(project, environment string) ([]SecretListItem, error) 
 		}
 		secrets := make([]SecretListItem, len(rows))
 		for i, r := range rows {
-			secrets[i] = SecretListItem{ID: r.ID, Key: r.Key, Project: r.Project, Environment: r.Environment, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+			secrets[i] = SecretListItem{ID: r.ID, Key: r.Key, EnvironmentID: r.EnvironmentID, Project: r.Project, Environment: r.Environment, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 		}
 		return secrets, nil
 	}
 }
 
-func (d *DB) UpdateSecret(id, key, value, project, environment string) error {
-	if ok, err := d.EnvironmentExists(project, environment); err != nil {
-		return fmt.Errorf("validate environment: %w", err)
-	} else if !ok {
-		return ErrInvalidEnvironment
-	}
+func (d *DB) UpdateSecret(id, key, value, environmentID string) error {
 	enc, err := d.encryptValue(value)
 	if err != nil {
 		return err
 	}
 	result, err := d.q.UpdateSecret(context.Background(), sqlcdb.UpdateSecretParams{
-		Key:         key,
-		Value:       enc,
-		Project:     project,
-		Environment: environment,
-		UpdatedAt:   time.Now().UTC(),
-		ID:          id,
+		Key:           key,
+		Value:         enc,
+		EnvironmentID: environmentID,
+		UpdatedAt:     time.Now().UTC(),
+		ID:            id,
 	})
 	if err != nil {
 		return err
@@ -196,12 +187,9 @@ func (d *DB) DeleteSecret(id string) error {
 	return nil
 }
 
-// GetSecretsByProjectEnv returns decrypted secrets for a given project+environment.
-func (d *DB) GetSecretsByProjectEnv(project, environment string) (map[string]string, error) {
-	rows, err := d.q.GetSecretsByProjectEnv(context.Background(), sqlcdb.GetSecretsByProjectEnvParams{
-		Project:     project,
-		Environment: environment,
-	})
+// GetSecretsByEnvironmentID returns decrypted secrets for a given environment ID.
+func (d *DB) GetSecretsByEnvironmentID(environmentID string) (map[string]string, error) {
+	rows, err := d.q.GetSecretsByEnvironmentID(context.Background(), environmentID)
 	if err != nil {
 		return nil, fmt.Errorf("query secrets: %w", err)
 	}

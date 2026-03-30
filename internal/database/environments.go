@@ -55,6 +55,25 @@ func (d *DB) ListEnvironments() ([]Environment, error) {
 	return envs, nil
 }
 
+func (d *DB) UpdateEnvironment(id, project, environment string) error {
+	result, err := d.q.UpdateEnvironment(context.Background(), sqlcdb.UpdateEnvironmentParams{
+		Project:     project,
+		Environment: environment,
+		ID:          id,
+	})
+	if err != nil {
+		return fmt.Errorf("update environment: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (d *DB) DeleteEnvironment(id string) error {
 	result, err := d.q.DeleteEnvironment(context.Background(), id)
 	if err != nil {
@@ -70,34 +89,17 @@ func (d *DB) DeleteEnvironment(id string) error {
 	return nil
 }
 
-func (d *DB) EnvironmentExists(project, environment string) (bool, error) {
-	count, err := d.q.EnvironmentExists(context.Background(), sqlcdb.EnvironmentExistsParams{
-		Project:     project,
-		Environment: environment,
-	})
-	if err != nil {
-		return false, fmt.Errorf("check environment exists: %w", err)
-	}
-	return count > 0, nil
-}
-
-// EnvironmentInUse checks whether any secrets or policies reference the given project/environment pair.
-func (d *DB) EnvironmentInUse(project, environment string) (bool, error) {
+// EnvironmentInUse checks whether any secrets or policies reference the given environment ID.
+func (d *DB) EnvironmentInUse(id string) (bool, error) {
 	ctx := context.Background()
-	count, err := d.q.EnvironmentInUseSecrets(ctx, sqlcdb.EnvironmentInUseSecretsParams{
-		Project:     project,
-		Environment: environment,
-	})
+	count, err := d.q.EnvironmentInUseSecrets(ctx, id)
 	if err != nil {
 		return false, err
 	}
 	if count > 0 {
 		return true, nil
 	}
-	count, err = d.q.EnvironmentInUsePolicies(ctx, sqlcdb.EnvironmentInUsePoliciesParams{
-		Project:     project,
-		Environment: environment,
-	})
+	count, err = d.q.EnvironmentInUsePolicies(ctx, id)
 	if err != nil {
 		return false, err
 	}

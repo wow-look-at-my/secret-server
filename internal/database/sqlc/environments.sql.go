@@ -51,49 +51,23 @@ func (q *Queries) DeleteEnvironment(ctx context.Context, id string) (sql.Result,
 	return q.db.ExecContext(ctx, deleteEnvironment, id)
 }
 
-const environmentExists = `-- name: EnvironmentExists :one
-SELECT COUNT(*) FROM environments WHERE project = ? AND environment = ?
-`
-
-type EnvironmentExistsParams struct {
-	Project     string
-	Environment string
-}
-
-func (q *Queries) EnvironmentExists(ctx context.Context, arg EnvironmentExistsParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, environmentExists, arg.Project, arg.Environment)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const environmentInUsePolicies = `-- name: EnvironmentInUsePolicies :one
-SELECT COUNT(*) FROM access_policies WHERE project = ? AND environment = ?
+SELECT COUNT(*) FROM access_policies WHERE environment_id = ?
 `
 
-type EnvironmentInUsePoliciesParams struct {
-	Project     string
-	Environment string
-}
-
-func (q *Queries) EnvironmentInUsePolicies(ctx context.Context, arg EnvironmentInUsePoliciesParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, environmentInUsePolicies, arg.Project, arg.Environment)
+func (q *Queries) EnvironmentInUsePolicies(ctx context.Context, environmentID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, environmentInUsePolicies, environmentID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
 }
 
 const environmentInUseSecrets = `-- name: EnvironmentInUseSecrets :one
-SELECT COUNT(*) FROM secrets WHERE project = ? AND environment = ?
+SELECT COUNT(*) FROM secrets WHERE environment_id = ?
 `
 
-type EnvironmentInUseSecretsParams struct {
-	Project     string
-	Environment string
-}
-
-func (q *Queries) EnvironmentInUseSecrets(ctx context.Context, arg EnvironmentInUseSecretsParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, environmentInUseSecrets, arg.Project, arg.Environment)
+func (q *Queries) EnvironmentInUseSecrets(ctx context.Context, environmentID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, environmentInUseSecrets, environmentID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -162,36 +136,16 @@ func (q *Queries) ListEnvironments(ctx context.Context) ([]Environment, error) {
 	return items, nil
 }
 
-const seedEnvironmentPairs = `-- name: SeedEnvironmentPairs :many
-SELECT DISTINCT project, environment FROM secrets
-UNION
-SELECT DISTINCT project, environment FROM access_policies
+const updateEnvironment = `-- name: UpdateEnvironment :execresult
+UPDATE environments SET project = ?, environment = ? WHERE id = ?
 `
 
-type SeedEnvironmentPairsRow struct {
+type UpdateEnvironmentParams struct {
 	Project     string
 	Environment string
+	ID          string
 }
 
-func (q *Queries) SeedEnvironmentPairs(ctx context.Context) ([]SeedEnvironmentPairsRow, error) {
-	rows, err := q.db.QueryContext(ctx, seedEnvironmentPairs)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []SeedEnvironmentPairsRow
-	for rows.Next() {
-		var i SeedEnvironmentPairsRow
-		if err := rows.Scan(&i.Project, &i.Environment); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+func (q *Queries) UpdateEnvironment(ctx context.Context, arg UpdateEnvironmentParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, updateEnvironment, arg.Project, arg.Environment, arg.ID)
 }

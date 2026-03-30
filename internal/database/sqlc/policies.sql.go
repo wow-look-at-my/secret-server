@@ -23,8 +23,8 @@ func (q *Queries) CountPolicies(ctx context.Context) (int64, error) {
 }
 
 const createPolicy = `-- name: CreatePolicy :exec
-INSERT INTO access_policies (id, name, repository_pattern, ref_pattern, project, environment, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO access_policies (id, name, repository_pattern, ref_pattern, environment_id, created_at)
+VALUES (?, ?, ?, ?, ?, ?)
 `
 
 type CreatePolicyParams struct {
@@ -32,8 +32,7 @@ type CreatePolicyParams struct {
 	Name              string
 	RepositoryPattern string
 	RefPattern        string
-	Project           string
-	Environment       string
+	EnvironmentID     string
 	CreatedAt         time.Time
 }
 
@@ -43,8 +42,7 @@ func (q *Queries) CreatePolicy(ctx context.Context, arg CreatePolicyParams) erro
 		arg.Name,
 		arg.RepositoryPattern,
 		arg.RefPattern,
-		arg.Project,
-		arg.Environment,
+		arg.EnvironmentID,
 		arg.CreatedAt,
 	)
 	return err
@@ -59,18 +57,32 @@ func (q *Queries) DeletePolicy(ctx context.Context, id string) (sql.Result, erro
 }
 
 const getPolicy = `-- name: GetPolicy :one
-SELECT id, name, repository_pattern, ref_pattern, project, environment, created_at
-FROM access_policies WHERE id = ?
+SELECT p.id, p.name, p.repository_pattern, p.ref_pattern, p.environment_id, e.project, e.environment, p.created_at
+FROM access_policies p
+JOIN environments e ON e.id = p.environment_id
+WHERE p.id = ?
 `
 
-func (q *Queries) GetPolicy(ctx context.Context, id string) (AccessPolicy, error) {
+type GetPolicyRow struct {
+	ID                string
+	Name              string
+	RepositoryPattern string
+	RefPattern        string
+	EnvironmentID     string
+	Project           string
+	Environment       string
+	CreatedAt         time.Time
+}
+
+func (q *Queries) GetPolicy(ctx context.Context, id string) (GetPolicyRow, error) {
 	row := q.db.QueryRowContext(ctx, getPolicy, id)
-	var i AccessPolicy
+	var i GetPolicyRow
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
 		&i.RepositoryPattern,
 		&i.RefPattern,
+		&i.EnvironmentID,
 		&i.Project,
 		&i.Environment,
 		&i.CreatedAt,
@@ -79,24 +91,38 @@ func (q *Queries) GetPolicy(ctx context.Context, id string) (AccessPolicy, error
 }
 
 const listPolicies = `-- name: ListPolicies :many
-SELECT id, name, repository_pattern, ref_pattern, project, environment, created_at
-FROM access_policies ORDER BY name
+SELECT p.id, p.name, p.repository_pattern, p.ref_pattern, p.environment_id, e.project, e.environment, p.created_at
+FROM access_policies p
+JOIN environments e ON e.id = p.environment_id
+ORDER BY p.name
 `
 
-func (q *Queries) ListPolicies(ctx context.Context) ([]AccessPolicy, error) {
+type ListPoliciesRow struct {
+	ID                string
+	Name              string
+	RepositoryPattern string
+	RefPattern        string
+	EnvironmentID     string
+	Project           string
+	Environment       string
+	CreatedAt         time.Time
+}
+
+func (q *Queries) ListPolicies(ctx context.Context) ([]ListPoliciesRow, error) {
 	rows, err := q.db.QueryContext(ctx, listPolicies)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []AccessPolicy
+	var items []ListPoliciesRow
 	for rows.Next() {
-		var i AccessPolicy
+		var i ListPoliciesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
 			&i.RepositoryPattern,
 			&i.RefPattern,
+			&i.EnvironmentID,
 			&i.Project,
 			&i.Environment,
 			&i.CreatedAt,
@@ -115,7 +141,7 @@ func (q *Queries) ListPolicies(ctx context.Context) ([]AccessPolicy, error) {
 }
 
 const updatePolicy = `-- name: UpdatePolicy :execresult
-UPDATE access_policies SET name = ?, repository_pattern = ?, ref_pattern = ?, project = ?, environment = ?
+UPDATE access_policies SET name = ?, repository_pattern = ?, ref_pattern = ?, environment_id = ?
 WHERE id = ?
 `
 
@@ -123,8 +149,7 @@ type UpdatePolicyParams struct {
 	Name              string
 	RepositoryPattern string
 	RefPattern        string
-	Project           string
-	Environment       string
+	EnvironmentID     string
 	ID                string
 }
 
@@ -133,8 +158,7 @@ func (q *Queries) UpdatePolicy(ctx context.Context, arg UpdatePolicyParams) (sql
 		arg.Name,
 		arg.RepositoryPattern,
 		arg.RefPattern,
-		arg.Project,
-		arg.Environment,
+		arg.EnvironmentID,
 		arg.ID,
 	)
 }

@@ -1,41 +1,56 @@
 -- name: GetSecret :one
-SELECT id, key, value, project, environment, created_at, updated_at
-FROM secrets WHERE id = ?;
+SELECT s.id, s.key, s.value, s.environment_id, e.project, e.environment, s.created_at, s.updated_at
+FROM secrets s
+JOIN environments e ON e.id = s.environment_id
+WHERE s.id = ?;
 
 -- name: CreateSecret :exec
-INSERT INTO secrets (id, key, value, project, environment, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?);
+INSERT INTO secrets (id, key, value, environment_id, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?);
 
 -- name: UpdateSecret :execresult
-UPDATE secrets SET key = ?, value = ?, project = ?, environment = ?, updated_at = ?
+UPDATE secrets SET key = ?, value = ?, environment_id = ?, updated_at = ?
 WHERE id = ?;
 
 -- name: DeleteSecret :execresult
 DELETE FROM secrets WHERE id = ?;
 
 -- name: ListSecretsAll :many
-SELECT id, key, project, environment, created_at, updated_at
-FROM secrets ORDER BY project, environment, key;
+SELECT s.id, s.key, s.environment_id, e.project, e.environment, s.created_at, s.updated_at
+FROM secrets s
+JOIN environments e ON e.id = s.environment_id
+ORDER BY e.project, e.environment, s.key;
 
 -- name: ListSecretsByProject :many
-SELECT id, key, project, environment, created_at, updated_at
-FROM secrets WHERE project = ? ORDER BY project, environment, key;
+SELECT s.id, s.key, s.environment_id, e.project, e.environment, s.created_at, s.updated_at
+FROM secrets s
+JOIN environments e ON e.id = s.environment_id
+WHERE e.project = ?
+ORDER BY e.project, e.environment, s.key;
 
 -- name: ListSecretsByEnv :many
-SELECT id, key, project, environment, created_at, updated_at
-FROM secrets WHERE environment = ? ORDER BY project, environment, key;
+SELECT s.id, s.key, s.environment_id, e.project, e.environment, s.created_at, s.updated_at
+FROM secrets s
+JOIN environments e ON e.id = s.environment_id
+WHERE e.environment = ?
+ORDER BY e.project, e.environment, s.key;
 
 -- name: ListSecretsByProjectAndEnv :many
-SELECT id, key, project, environment, created_at, updated_at
-FROM secrets WHERE project = ? AND environment = ?
-ORDER BY project, environment, key;
+SELECT s.id, s.key, s.environment_id, e.project, e.environment, s.created_at, s.updated_at
+FROM secrets s
+JOIN environments e ON e.id = s.environment_id
+WHERE e.project = ? AND e.environment = ?
+ORDER BY e.project, e.environment, s.key;
 
--- name: GetSecretsByProjectEnv :many
-SELECT key, value FROM secrets WHERE project = ? AND environment = ?;
+-- name: GetSecretsByEnvironmentID :many
+SELECT key, value FROM secrets WHERE environment_id = ?;
 
 -- name: CountSecrets :one
 SELECT COUNT(*) FROM secrets;
 
 -- name: SecretCountsByProjectEnv :many
-SELECT project, environment, COUNT(*) AS secret_count
-FROM secrets GROUP BY project, environment ORDER BY project, environment;
+SELECT e.project, e.environment, COUNT(*) AS secret_count
+FROM secrets s
+JOIN environments e ON e.id = s.environment_id
+GROUP BY e.project, e.environment
+ORDER BY e.project, e.environment;

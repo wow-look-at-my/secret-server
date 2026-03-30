@@ -38,7 +38,7 @@
             <option value="">-- Select Environment --</option>
             {{range .Environments}}
             <option value="{{.ID}}"
-                {{if and (not $.IsNew) (eq $.Policy.Project .Project) (eq $.Policy.Environment .Environment)}}selected{{end}}>
+                {{if and (not $.IsNew) (eq $.Policy.EnvironmentID .ID)}}selected{{end}}>
                 {{.Project}} / {{.Environment}}
             </option>
             {{end}}
