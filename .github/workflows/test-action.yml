@@ -1,0 +1,41 @@
+name: Test Action
+
+on:
+  push:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  test-action:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch secrets
+        id: fetch
+        uses: ./
+
+      - name: Verify secrets output
+        env:
+          SECRETS_JSON: ${{ steps.fetch.outputs.secrets }}
+        run: |
+          if [ -z "$SECRETS_JSON" ]; then
+            echo "::error::No secrets output returned"
+            exit 1
+          fi
+
+          # Validate it's real JSON
+          if ! echo "$SECRETS_JSON" | jq empty 2>/dev/null; then
+            echo "::error::Secrets output is not valid JSON"
+            exit 1
+          fi
+
+          COUNT=$(echo "$SECRETS_JSON" | jq 'length')
+          if [ "$COUNT" -lt 1 ]; then
+            echo "::error::Expected at least 1 secret, got $COUNT — is there a policy for wow-look-at-my/secret-server?"
+            exit 1
+          fi
+
+          echo "Successfully fetched $COUNT secret(s)"
