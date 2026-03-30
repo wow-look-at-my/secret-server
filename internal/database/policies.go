@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -127,8 +128,16 @@ func (d *DB) MatchingPolicies(repository, ref string) ([]Policy, error) {
 
 	var matched []Policy
 	for _, p := range policies {
-		repoMatch, _ := matchGlob(p.RepositoryPattern, repository)
-		refMatch, _ := matchGlob(p.RefPattern, ref)
+		repoMatch, err := matchGlob(p.RepositoryPattern, repository)
+		if err != nil {
+			slog.Warn("invalid repository glob pattern in policy", "policy_id", p.ID, "pattern", p.RepositoryPattern, "error", err)
+			continue
+		}
+		refMatch, err := matchGlob(p.RefPattern, ref)
+		if err != nil {
+			slog.Warn("invalid ref glob pattern in policy", "policy_id", p.ID, "pattern", p.RefPattern, "error", err)
+			continue
+		}
 		if repoMatch && refMatch {
 			matched = append(matched, p)
 		}

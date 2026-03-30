@@ -37,6 +37,9 @@ func (h *PublicHandler) logAccessDenied(actorType, actorID, reason string, extra
 }
 
 func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
+	// Limit request body to prevent abuse (this is a GET endpoint but limit anyway).
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+
 	authHeader := r.Header.Get("Authorization")
 	if !strings.HasPrefix(authHeader, "Bearer ") {
 		h.logAccessDenied("anonymous", "unknown", "missing_token", map[string]any{

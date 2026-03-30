@@ -12,6 +12,22 @@ import (
 	"github.com/wow-look-at-my/secret-server/internal/database"
 )
 
+// maxRequestBodySize is the maximum allowed request body size (1 MB).
+const maxRequestBodySize = 1 << 20
+
+// requireJSON checks that the request Content-Type is application/json and
+// limits the request body size. Returns false and writes an error response
+// if the check fails.
+func requireJSON(w http.ResponseWriter, r *http.Request) bool {
+	ct := r.Header.Get("Content-Type")
+	if ct != "application/json" {
+		http.Error(w, `{"error":"Content-Type must be application/json"}`, http.StatusUnsupportedMediaType)
+		return false
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+	return true
+}
+
 // validUUID returns true if s is a well-formed UUID.
 func validUUID(s string) bool {
 	_, err := uuid.Parse(s)
@@ -54,6 +70,9 @@ func adminActor(r *http.Request) string {
 }
 
 func (h *AdminHandler) createSecret(w http.ResponseWriter, r *http.Request) {
+	if !requireJSON(w, r) {
+		return
+	}
 	var req struct {
 		Key           string `json:"key"`
 		Value         string `json:"value"`
@@ -99,6 +118,9 @@ func (h *AdminHandler) createSecret(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminHandler) updateSecret(w http.ResponseWriter, r *http.Request) {
+	if !requireJSON(w, r) {
+		return
+	}
 	id := chi.URLParam(r, "id")
 	var req struct {
 		Key           string `json:"key"`
@@ -174,6 +196,9 @@ func (h *AdminHandler) deleteSecret(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
+	if !requireJSON(w, r) {
+		return
+	}
 	var req struct {
 		Name              string `json:"name"`
 		RepositoryPattern string `json:"repository_pattern"`
@@ -223,6 +248,9 @@ func (h *AdminHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
+	if !requireJSON(w, r) {
+		return
+	}
 	id := chi.URLParam(r, "id")
 	var req struct {
 		Name              string `json:"name"`
@@ -298,6 +326,9 @@ func (h *AdminHandler) listEnvironments(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *AdminHandler) createEnvironment(w http.ResponseWriter, r *http.Request) {
+	if !requireJSON(w, r) {
+		return
+	}
 	var req struct {
 		Project     string `json:"project"`
 		Environment string `json:"environment"`
@@ -328,6 +359,9 @@ func (h *AdminHandler) createEnvironment(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *AdminHandler) updateEnvironment(w http.ResponseWriter, r *http.Request) {
+	if !requireJSON(w, r) {
+		return
+	}
 	id := chi.URLParam(r, "id")
 	var req struct {
 		Project     string `json:"project"`
