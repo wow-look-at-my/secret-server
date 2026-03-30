@@ -18,7 +18,7 @@ func TestPublicFetchSecretsNoToken(t *testing.T) {
 	mux := chi.NewRouter()
 	h.Register(mux)
 
-	req := httptest.NewRequest("POST", "/github/v1/secrets", nil)
+	req := httptest.NewRequest("GET", "/github/v1/secrets", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
@@ -44,7 +44,7 @@ func TestPublicFetchSecretsWithPolicy(t *testing.T) {
 	h.Register(mux)
 
 	token := makeOIDCToken(t, env.jwk, "myorg/repo", "refs/heads/main")
-	req := httptest.NewRequest("POST", "/github/v1/secrets", nil)
+	req := httptest.NewRequest("GET", "/github/v1/secrets", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -75,7 +75,7 @@ func TestPublicFetchSecretsNoMatchingPolicy(t *testing.T) {
 	h.Register(mux)
 
 	token := makeOIDCToken(t, env.jwk, "myorg/repo", "refs/heads/main")
-	req := httptest.NewRequest("POST", "/github/v1/secrets", nil)
+	req := httptest.NewRequest("GET", "/github/v1/secrets", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -100,7 +100,7 @@ func TestPublicFetchSecretsInvalidToken(t *testing.T) {
 	mux := chi.NewRouter()
 	h.Register(mux)
 
-	req := httptest.NewRequest("POST", "/github/v1/secrets", nil)
+	req := httptest.NewRequest("GET", "/github/v1/secrets", nil)
 	req.Header.Set("Authorization", "Bearer invalid-token")
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -123,7 +123,7 @@ func TestPublicFetchSecretsPolicyDBError(t *testing.T) {
 	h.Register(mux)
 
 	token := makeOIDCToken(t, env.jwk, "myorg/repo", "refs/heads/main")
-	req := httptest.NewRequest("POST", "/github/v1/secrets", nil)
+	req := httptest.NewRequest("GET", "/github/v1/secrets", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -152,7 +152,7 @@ func TestPublicFetchSecretsMultiplePoliciesSameProjectEnv(t *testing.T) {
 	h.Register(mux)
 
 	token := makeOIDCToken(t, env.jwk, "myorg/repo", "refs/heads/main")
-	req := httptest.NewRequest("POST", "/github/v1/secrets", nil)
+	req := httptest.NewRequest("GET", "/github/v1/secrets", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -178,7 +178,7 @@ func TestPublicFetchSecretsMultipleProjectEnvs(t *testing.T) {
 	h.Register(mux)
 
 	token := makeOIDCToken(t, env.jwk, "myorg/repo", "refs/heads/main")
-	req := httptest.NewRequest("POST", "/github/v1/secrets", nil)
+	req := httptest.NewRequest("GET", "/github/v1/secrets", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)

@@ -22,7 +22,7 @@ func NewPublicHandler(db *database.DB, audit *database.AuditDB, oidc *auth.GitHu
 }
 
 func (h *PublicHandler) Register(r chi.Router) {
-	r.Post(GitHubPrefix+"/secrets", h.fetchSecrets)
+	r.Get(GitHubPrefix+"/secrets", h.fetchSecrets)
 }
 
 func (h *PublicHandler) logAccessDenied(actorType, actorID, reason string, extra map[string]any) {

@@ -34,7 +34,7 @@ runs:
 
         # Fetch secrets from the server
         HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer ${OIDC_TOKEN}" \
-          -X POST "${SECRET_SERVER_URL}/github/v1/secrets")
+          "${SECRET_SERVER_URL}/github/v1/secrets")
 
         HTTP_STATUS=$(echo "$HTTP_RESPONSE" | tail -1)
         SECRETS=$(echo "$HTTP_RESPONSE" | sed '$d')
