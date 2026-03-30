@@ -154,7 +154,7 @@ func TestSecretCRUD(t *testing.T) {
 	require.Nil(t, err)
 	require.Equal(t, 1, len(secrets))
 
-	// List with filter
+	// List with project filter
 	secrets, err = db.ListSecrets("myapp", "")
 	require.Nil(t, err)
 	require.Equal(t, 1, len(secrets))
@@ -162,6 +162,16 @@ func TestSecretCRUD(t *testing.T) {
 	secrets, err = db.ListSecrets("other", "")
 	require.Nil(t, err)
 	require.Equal(t, 0, len(secrets))
+
+	// List with environment filter
+	secrets, err = db.ListSecrets("", "prod")
+	require.Nil(t, err)
+	require.Equal(t, 1, len(secrets))
+
+	// List with both filters
+	secrets, err = db.ListSecrets("myapp", "prod")
+	require.Nil(t, err)
+	require.Equal(t, 1, len(secrets))
 
 	// Update
 	err = db.UpdateSecret(s.ID, "API_KEY", "newsecret", "myapp", "prod")
@@ -318,11 +328,12 @@ func TestDashboardStats(t *testing.T) {
 }
 
 func TestSeedEnvironments(t *testing.T) {
-	// Test that existing data is seeded into environments table on migration.
-	// We can't easily test this with a fresh DB since there's no data to seed.
-	// But we can verify the seed function is idempotent.
 	db := testDB(t)
+
+	// Create an environment and a secret so there's data to seed from
 	_, err := db.CreateEnvironment("proj", "prod")
+	require.Nil(t, err)
+	_, err = db.CreateSecret("KEY", "val", "proj", "prod")
 	require.Nil(t, err)
 
 	// Running seed again should not fail or create duplicates
