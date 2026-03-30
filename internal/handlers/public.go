@@ -64,15 +64,17 @@ func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
 	slog.Info("OIDC token validated",
 		"repository", claims.Repository,
 		"ref", claims.Ref,
+		"actor", claims.Actor,
 		"workflow", claims.Workflow,
 	)
 
-	policies, err := h.db.MatchingPolicies(claims.Repository, claims.Ref)
+	policies, err := h.db.MatchingPolicies(claims.Repository, claims.Ref, claims.Actor)
 	if err != nil {
 		slog.Error("failed to match policies", "error", err)
 		h.logAccessDenied("github_actions", claims.Repository, "policy_lookup_error", map[string]any{
 			"repository": claims.Repository,
 			"ref":        claims.Ref,
+			"actor":      claims.Actor,
 			"workflow":   claims.Workflow,
 			"error":      err.Error(),
 		})
@@ -88,6 +90,7 @@ func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
 		h.logAccessDenied("github_actions", claims.Repository, "no_matching_policies", map[string]any{
 			"repository": claims.Repository,
 			"ref":        claims.Ref,
+			"actor":      claims.Actor,
 			"workflow":   claims.Workflow,
 		})
 		w.Header().Set("Content-Type", "application/json")
@@ -110,6 +113,7 @@ func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
 			h.logAccessDenied("github_actions", claims.Repository, "secret_retrieval_error", map[string]any{
 				"repository":  claims.Repository,
 				"ref":         claims.Ref,
+				"actor":       claims.Actor,
 				"workflow":    claims.Workflow,
 				"project":     p.Project,
 				"environment": p.Environment,
@@ -130,6 +134,7 @@ func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
 	details, _ := json.Marshal(map[string]any{
 		"repository":    claims.Repository,
 		"ref":           claims.Ref,
+		"actor":         claims.Actor,
 		"workflow":      claims.Workflow,
 		"policies":      policyIDs,
 		"secrets_count": len(result),

@@ -33,6 +33,7 @@ func setupTestDB(t *testing.T) *sqlcdb.Queries {
 		CREATE TABLE access_policies (
 			id TEXT PRIMARY KEY, name TEXT NOT NULL,
 			repository_pattern TEXT NOT NULL, ref_pattern TEXT NOT NULL DEFAULT '*',
+			actor_pattern TEXT NOT NULL DEFAULT '*',
 			environment_id TEXT NOT NULL REFERENCES environments(id),
 			created_at DATETIME NOT NULL
 		);
@@ -221,8 +222,8 @@ func TestPolicyQueries(t *testing.T) {
 
 	err := q.CreatePolicy(ctx, sqlcdb.CreatePolicyParams{
 		ID: "p1", Name: "Allow prod", RepositoryPattern: "org/*",
-		RefPattern: "refs/heads/main", EnvironmentID: "env-1",
-		CreatedAt: now,
+		RefPattern: "refs/heads/main", ActorPattern: "*",
+		EnvironmentID: "env-1", CreatedAt: now,
 	})
 	require.Nil(t, err)
 
@@ -243,7 +244,7 @@ func TestPolicyQueries(t *testing.T) {
 
 	result, err := q.UpdatePolicy(ctx, sqlcdb.UpdatePolicyParams{
 		Name: "Updated", RepositoryPattern: "other/*", RefPattern: "*",
-		EnvironmentID: "env-1", ID: "p1",
+		ActorPattern: "*", EnvironmentID: "env-1", ID: "p1",
 	})
 	require.Nil(t, err)
 	n, _ := result.RowsAffected()

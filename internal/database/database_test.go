@@ -140,7 +140,7 @@ func TestEnvironmentInUse(t *testing.T) {
 	db.DeleteSecret(s.ID)
 
 	// Create a policy referencing it
-	_, err = db.CreatePolicy("p1", "*", "*", env.ID)
+	_, err = db.CreatePolicy("p1", "*", "*", "*", env.ID)
 	require.Nil(t, err)
 
 	inUse, err = db.EnvironmentInUse(env.ID)
@@ -156,7 +156,7 @@ func TestSecretFKConstraint(t *testing.T) {
 	require.NotNil(t, err)
 
 	// Creating a policy with a non-existent environment_id should fail (FK)
-	_, err = db.CreatePolicy("p1", "*", "*", "nonexistent-env-id")
+	_, err = db.CreatePolicy("p1", "*", "*", "*", "nonexistent-env-id")
 	require.NotNil(t, err)
 
 	// Create the environment, then it should work
@@ -166,7 +166,7 @@ func TestSecretFKConstraint(t *testing.T) {
 	_, err = db.CreateSecret("KEY", "val", env.ID)
 	require.Nil(t, err)
 
-	_, err = db.CreatePolicy("p1", "*", "*", env.ID)
+	_, err = db.CreatePolicy("p1", "*", "*", "*", env.ID)
 	require.Nil(t, err)
 }
 
@@ -270,7 +270,7 @@ func TestPolicyCRUD(t *testing.T) {
 	require.Nil(t, err)
 
 	// Create
-	p, err := db.CreatePolicy("Allow prod", "myorg/*", "refs/heads/main", envProd.ID)
+	p, err := db.CreatePolicy("Allow prod", "myorg/*", "refs/heads/main", "*", envProd.ID)
 	require.Nil(t, err)
 	require.NotEqual(t, "", p.ID)
 
@@ -288,7 +288,7 @@ func TestPolicyCRUD(t *testing.T) {
 	require.Equal(t, 1, len(policies))
 
 	// Update
-	err = db.UpdatePolicy(p.ID, "Updated", "other/*", "*", envStaging.ID)
+	err = db.UpdatePolicy(p.ID, "Updated", "other/*", "*", "*", envStaging.ID)
 	require.Nil(t, err)
 
 	got, _ = db.GetPolicy(p.ID)
@@ -320,24 +320,48 @@ func TestMatchingPolicies(t *testing.T) {
 	envOther, err := db.CreateEnvironment("other", "prod")
 	require.Nil(t, err)
 
-	db.CreatePolicy("p1", "myorg/*", "refs/heads/main", envProd.ID)
-	db.CreatePolicy("p2", "myorg/specific", "*", envDev.ID)
-	db.CreatePolicy("p3", "other/*", "*", envOther.ID)
+	db.CreatePolicy("p1", "myorg/*", "refs/heads/main", "*", envProd.ID)
+	db.CreatePolicy("p2", "myorg/specific", "*", "*", envDev.ID)
+	db.CreatePolicy("p3", "other/*", "*", "*", envOther.ID)
 
 	// Should match p1 only
-	matched, err := db.MatchingPolicies("myorg/repo", "refs/heads/main")
+	matched, err := db.MatchingPolicies("myorg/repo", "refs/heads/main", "someone")
 	require.Nil(t, err)
 	assert.False(t, len(matched) != 1 || matched[0].Name != "p1")
 
 	// Should match p1 and p2
-	matched, err = db.MatchingPolicies("myorg/specific", "refs/heads/main")
+	matched, err = db.MatchingPolicies("myorg/specific", "refs/heads/main", "someone")
 	require.Nil(t, err)
 	assert.Equal(t, 2, len(matched))
 
 	// No match
-	matched, err = db.MatchingPolicies("unknown/repo", "refs/heads/main")
+	matched, err = db.MatchingPolicies("unknown/repo", "refs/heads/main", "someone")
 	require.Nil(t, err)
 	assert.Equal(t, 0, len(matched))
+}
+
+func TestMatchingPoliciesActorFilter(t *testing.T) {
+	db := testDB(t)
+	env, err := db.CreateEnvironment("app", "prod")
+	require.Nil(t, err)
+
+	db.CreatePolicy("deployers-only", "myorg/*", "*", "deploy-*", env.ID)
+
+	// Actor matches glob
+	matched, err := db.MatchingPolicies("myorg/repo", "refs/heads/main", "deploy-bot")
+	require.Nil(t, err)
+	assert.Equal(t, 1, len(matched))
+
+	// Actor does not match glob
+	matched, err = db.MatchingPolicies("myorg/repo", "refs/heads/main", "random-user")
+	require.Nil(t, err)
+	assert.Equal(t, 0, len(matched))
+
+	// Wildcard actor pattern matches anyone
+	db.CreatePolicy("open", "myorg/*", "*", "*", env.ID)
+	matched, err = db.MatchingPolicies("myorg/repo", "refs/heads/main", "random-user")
+	require.Nil(t, err)
+	assert.Equal(t, 1, len(matched))
 }
 
 func TestDashboardStats(t *testing.T) {
@@ -350,7 +374,7 @@ func TestDashboardStats(t *testing.T) {
 	db.CreateSecret("A", "1", envProd.ID)
 	db.CreateSecret("B", "2", envProd.ID)
 	db.CreateSecret("C", "3", envDev.ID)
-	db.CreatePolicy("p1", "*", "*", envProd.ID)
+	db.CreatePolicy("p1", "*", "*", "*", envProd.ID)
 
 	stats, err := db.GetDashboardStats()
 	require.Nil(t, err)
@@ -398,10 +422,10 @@ func TestUpdatePolicyInvalidEnvironment(t *testing.T) {
 	env, err := db.CreateEnvironment("myapp", "prod")
 	require.Nil(t, err)
 
-	p, err := db.CreatePolicy("p1", "*", "*", env.ID)
+	p, err := db.CreatePolicy("p1", "*", "*", "*", env.ID)
 	require.Nil(t, err)
 
-	err = db.UpdatePolicy(p.ID, "p1", "*", "*", "nonexistent-env-id")
+	err = db.UpdatePolicy(p.ID, "p1", "*", "*", "*", "nonexistent-env-id")
 	require.NotNil(t, err)
 }
 
@@ -488,10 +512,68 @@ func TestMigrateFromOldSchema(t *testing.T) {
 	assert.Equal(t, "app", policy.Project)
 	assert.Equal(t, "prod", policy.Environment)
 	assert.Equal(t, "env-1", policy.EnvironmentID)
+	assert.Equal(t, "*", policy.ActorPattern)
 
 	// Verify the environment is intact.
 	env, err := db.GetEnvironment("env-1")
 	require.Nil(t, err)
 	require.NotNil(t, env)
 	assert.Equal(t, "app", env.Project)
+}
+
+func TestMigrateActorPattern(t *testing.T) {
+	// Create a database with the new schema but WITHOUT actor_pattern column,
+	// then open it with New() to trigger the actor_pattern migration.
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i)
+	}
+	enc, err := crypto.NewEncryptor(key)
+	require.Nil(t, err)
+
+	dbPath := t.TempDir() + "/migrate-actor-test.db"
+
+	rawDB, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(wal)&_pragma=foreign_keys(on)")
+	require.Nil(t, err)
+
+	_, err = rawDB.Exec(`
+		CREATE TABLE environments (
+			id TEXT PRIMARY KEY, project TEXT NOT NULL, environment TEXT NOT NULL,
+			created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+			UNIQUE(project, environment)
+		);
+		CREATE TABLE secrets (
+			id TEXT PRIMARY KEY, key TEXT NOT NULL, value BLOB NOT NULL,
+			environment_id TEXT NOT NULL REFERENCES environments(id),
+			created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+			updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
+			UNIQUE(key, environment_id)
+		);
+		CREATE TABLE access_policies (
+			id TEXT PRIMARY KEY, name TEXT NOT NULL,
+			repository_pattern TEXT NOT NULL, ref_pattern TEXT NOT NULL DEFAULT '*',
+			environment_id TEXT NOT NULL REFERENCES environments(id),
+			created_at DATETIME NOT NULL DEFAULT (datetime('now'))
+		);
+		CREATE INDEX idx_secrets_env_id ON secrets(environment_id);
+		CREATE INDEX idx_policies_env_id ON access_policies(environment_id);
+	`)
+	require.Nil(t, err)
+
+	_, err = rawDB.Exec(`INSERT INTO environments (id, project, environment) VALUES ('env-1', 'app', 'prod')`)
+	require.Nil(t, err)
+	_, err = rawDB.Exec(`INSERT INTO access_policies (id, name, repository_pattern, ref_pattern, environment_id) VALUES ('pol-1', 'allow', 'org/*', '*', 'env-1')`)
+	require.Nil(t, err)
+
+	rawDB.Close()
+
+	// Open with New() — should add actor_pattern column.
+	db, err := New(dbPath, enc)
+	require.Nil(t, err)
+	defer db.Close()
+
+	policy, err := db.GetPolicy("pol-1")
+	require.Nil(t, err)
+	require.NotNil(t, policy)
+	assert.Equal(t, "*", policy.ActorPattern)
 }

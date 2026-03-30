@@ -113,6 +113,10 @@ func jsonReq(method, target, body string) *http.Request {
 }
 
 func makeOIDCToken(t *testing.T, jwk jose.JSONWebKey, repo, ref string) string {
+	return makeOIDCTokenWithActor(t, jwk, repo, ref, "deploy-bot")
+}
+
+func makeOIDCTokenWithActor(t *testing.T, jwk jose.JSONWebKey, repo, ref, actor string) string {
 	t.Helper()
 	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: jwk}, (&jose.SignerOptions{}).WithType("JWT"))
 	require.Nil(t, err)
@@ -128,10 +132,12 @@ func makeOIDCToken(t *testing.T, jwk jose.JSONWebKey, repo, ref string) string {
 	customClaims := struct {
 		Repository      string `json:"repository"`
 		RepositoryOwner string `json:"repository_owner"`
+		Actor           string `json:"actor"`
 		Ref             string `json:"ref"`
 	}{
 		Repository:      repo,
 		RepositoryOwner: strings.Split(repo, "/")[0],
+		Actor:           actor,
 		Ref:             ref,
 	}
 	token, err := jwt.Signed(signer).Claims(stdClaims).Claims(customClaims).Serialize()

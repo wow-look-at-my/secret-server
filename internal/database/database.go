@@ -85,6 +85,7 @@ func (d *DB) migrate() error {
 				name TEXT NOT NULL,
 				repository_pattern TEXT NOT NULL,
 				ref_pattern TEXT NOT NULL DEFAULT '*',
+				actor_pattern TEXT NOT NULL DEFAULT '*',
 				environment_id TEXT NOT NULL REFERENCES environments(id),
 				created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 			);
@@ -97,7 +98,40 @@ func (d *DB) migrate() error {
 		}
 	}
 
+	// Add actor_pattern column if it doesn't exist yet (upgrade path).
+	if err := d.migrateActorPattern(); err != nil {
+		return fmt.Errorf("migrate actor_pattern: %w", err)
+	}
+
 	return nil
+}
+
+func (d *DB) migrateActorPattern() error {
+	rows, err := d.db.Query("PRAGMA table_info(access_policies)")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull int
+		var dflt sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == "actor_pattern" {
+			return nil // already migrated
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	_, err = d.db.Exec("ALTER TABLE access_policies ADD COLUMN actor_pattern TEXT NOT NULL DEFAULT '*'")
+	return err
 }
 
 // hasOldSchema returns true if the secrets table has a "project" column
@@ -175,11 +209,12 @@ func (d *DB) migrateToEnvironmentID() error {
 			name TEXT NOT NULL,
 			repository_pattern TEXT NOT NULL,
 			ref_pattern TEXT NOT NULL DEFAULT '*',
+			actor_pattern TEXT NOT NULL DEFAULT '*',
 			environment_id TEXT NOT NULL REFERENCES environments(id),
 			created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 		)`,
-		`INSERT INTO access_policies_new (id, name, repository_pattern, ref_pattern, environment_id, created_at)
-			SELECT p.id, p.name, p.repository_pattern, p.ref_pattern, e.id, p.created_at
+		`INSERT INTO access_policies_new (id, name, repository_pattern, ref_pattern, actor_pattern, environment_id, created_at)
+			SELECT p.id, p.name, p.repository_pattern, p.ref_pattern, '*', e.id, p.created_at
 			FROM access_policies p
 			JOIN environments e ON e.project = p.project AND e.environment = p.environment`,
 		`DROP TABLE access_policies`,

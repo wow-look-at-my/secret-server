@@ -32,6 +32,14 @@
     </div>
 
     <div class="form-group">
+        <label for="actor_pattern">Actor Pattern</label>
+        <input type="text" id="actor_pattern" name="actor_pattern"
+            value="{{if .IsNew}}*{{else}}{{.Policy.ActorPattern}}{{end}}"
+            placeholder="e.g. octocat, my-team-*, or *">
+        <div class="hint">GitHub username filter for who triggered the workflow. Use * to allow any actor.</div>
+    </div>
+
+    <div class="form-group">
         <label for="env_id">Project / Environment</label>
         {{if .Environments}}
         <select id="env_id" name="env_id" required>

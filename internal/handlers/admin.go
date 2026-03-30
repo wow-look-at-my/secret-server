@@ -203,6 +203,7 @@ func (h *AdminHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
 		Name              string `json:"name"`
 		RepositoryPattern string `json:"repository_pattern"`
 		RefPattern        string `json:"ref_pattern"`
+		ActorPattern      string `json:"actor_pattern"`
 		EnvironmentID     string `json:"environment_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -220,6 +221,9 @@ func (h *AdminHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
 	if req.RefPattern == "" {
 		req.RefPattern = "*"
 	}
+	if req.ActorPattern == "" {
+		req.ActorPattern = "*"
+	}
 
 	env, err := h.db.GetEnvironment(req.EnvironmentID)
 	if err != nil {
@@ -231,7 +235,7 @@ func (h *AdminHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	policy, err := h.db.CreatePolicy(req.Name, req.RepositoryPattern, req.RefPattern, req.EnvironmentID)
+	policy, err := h.db.CreatePolicy(req.Name, req.RepositoryPattern, req.RefPattern, req.ActorPattern, req.EnvironmentID)
 	if err != nil {
 		http.Error(w, `{"error":"failed to create policy"}`, http.StatusInternalServerError)
 		return
@@ -256,6 +260,7 @@ func (h *AdminHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 		Name              string `json:"name"`
 		RepositoryPattern string `json:"repository_pattern"`
 		RefPattern        string `json:"ref_pattern"`
+		ActorPattern      string `json:"actor_pattern"`
 		EnvironmentID     string `json:"environment_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -268,6 +273,10 @@ func (h *AdminHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.ActorPattern == "" {
+		req.ActorPattern = "*"
+	}
+
 	env, err := h.db.GetEnvironment(req.EnvironmentID)
 	if err != nil {
 		http.Error(w, `{"error":"failed to look up environment"}`, http.StatusInternalServerError)
@@ -278,7 +287,7 @@ func (h *AdminHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.db.UpdatePolicy(id, req.Name, req.RepositoryPattern, req.RefPattern, req.EnvironmentID); err != nil {
+	if err := h.db.UpdatePolicy(id, req.Name, req.RepositoryPattern, req.RefPattern, req.ActorPattern, req.EnvironmentID); err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			http.Error(w, `{"error":"policy not found"}`, http.StatusNotFound)
 			return
