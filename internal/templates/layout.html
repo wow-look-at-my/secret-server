@@ -121,6 +121,17 @@
         .empty { color: var(--muted); text-align: center; padding: 2rem; }
         .hint { font-size: 0.8rem; color: var(--muted); margin-top: 0.2rem; }
         .page-desc { color: var(--muted); margin-bottom: 1rem; margin-top: -0.5rem; }
+        .input-wrap { position: relative; }
+        .input-wrap .btn { position: absolute; right: 4px; top: 4px; }
+        .json-details { margin-top: 0.5rem; }
+        .json-details summary { cursor: pointer; font-size: 0.85rem; color: var(--muted); }
+        .json-details pre { background: var(--bg-alt); border: 1px solid var(--border); border-radius: 4px; padding: 0.5rem; margin-top: 0.25rem; font-size: 0.8rem; overflow-x: auto; }
+        .no-env { margin: 0.5rem 0; }
+        .audit-details { font-size: 0.8rem; word-break: break-all; }
+        .pagination { margin-top: 1rem; display: flex; gap: 1rem; }
+        .toolbar-actions { display: flex; gap: 0.5rem; align-items: center; }
+        h2.section-heading { margin-bottom: 0.5rem; }
+        footer { text-align: center; padding: 1.5rem; font-size: 0.75rem; color: var(--muted); }
     </style>
 </head>
 <body>
@@ -136,7 +147,7 @@
 
 {{define "foot"}}
 </main>
-{{with version}}<footer style="text-align:center;padding:1.5rem;font-size:0.75rem;color:var(--muted);">{{.}}</footer>{{end}}
+{{with version}}<footer>{{.}}</footer>{{end}}
 </body>
 </html>
 {{end}}
