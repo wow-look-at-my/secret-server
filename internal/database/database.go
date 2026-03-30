@@ -1,12 +1,14 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/wow-look-at-my/secret-server/internal/crypto"
+	"github.com/wow-look-at-my/secret-server/internal/database/sqlc"
 
 	_ "modernc.org/sqlite"
 )
@@ -16,6 +18,7 @@ var ErrNotFound = errors.New("not found")
 
 type DB struct {
 	db        *sql.DB
+	q         *sqlcdb.Queries
 	encryptor *crypto.Encryptor
 }
 
@@ -27,7 +30,7 @@ func New(dbPath string, encryptor *crypto.Encryptor) (*DB, error) {
 	if err := db.Ping(); err != nil {
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
-	d := &DB{db: db, encryptor: encryptor}
+	d := &DB{db: db, q: sqlcdb.New(db), encryptor: encryptor}
 	if err := d.migrate(); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
@@ -198,6 +201,8 @@ func (d *DB) migrateToEnvironmentID() error {
 }
 
 func (d *DB) seedEnvironments() error {
+	// Raw SQL because this queries OLD schema columns (project, environment)
+	// that only exist before migration to environment_id FK.
 	rows, err := d.db.Query(`
 		SELECT DISTINCT project, environment FROM secrets
 		UNION
@@ -208,15 +213,17 @@ func (d *DB) seedEnvironments() error {
 	}
 	defer rows.Close()
 
+	ctx := context.Background()
 	for rows.Next() {
 		var project, environment string
 		if err := rows.Scan(&project, &environment); err != nil {
 			return fmt.Errorf("scan project/env pair: %w", err)
 		}
-		_, err := d.db.Exec(
-			"INSERT OR IGNORE INTO environments (id, project, environment) VALUES (?, ?, ?)",
-			uuid.New().String(), project, environment,
-		)
+		err := d.q.InsertEnvironmentIgnore(ctx, sqlcdb.InsertEnvironmentIgnoreParams{
+			ID:          uuid.New().String(),
+			Project:     project,
+			Environment: environment,
+		})
 		if err != nil {
 			return fmt.Errorf("seed environment %s/%s: %w", project, environment, err)
 		}

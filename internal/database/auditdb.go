@@ -1,11 +1,13 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	sqlcdb "github.com/wow-look-at-my/secret-server/internal/database/sqlc"
 
 	_ "modernc.org/sqlite"
 )
@@ -15,6 +17,7 @@ import (
 // of credential data during hardware/power failures.
 type AuditDB struct {
 	db *sql.DB
+	q  *sqlcdb.Queries
 }
 
 type AuditEntry struct {
@@ -36,7 +39,7 @@ func NewAuditDB(dbPath string) (*AuditDB, error) {
 	if err := db.Ping(); err != nil {
 		return nil, fmt.Errorf("ping audit database: %w", err)
 	}
-	a := &AuditDB{db: db}
+	a := &AuditDB{db: db, q: sqlcdb.New(db)}
 	if err := a.migrate(); err != nil {
 		return nil, fmt.Errorf("migrate audit database: %w", err)
 	}
@@ -66,40 +69,46 @@ func (a *AuditDB) migrate() error {
 }
 
 func (a *AuditDB) CreateEntry(action, actorType, actorID, resourceType, resourceID, details string) error {
-	id := uuid.New().String()
-	_, err := a.db.Exec(
-		"INSERT INTO audit_log (id, timestamp, action, actor_type, actor_id, resource_type, resource_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-		id, time.Now().UTC(), action, actorType, actorID, resourceType, resourceID, details,
-	)
-	return err
+	return a.q.CreateAuditEntry(context.Background(), sqlcdb.CreateAuditEntryParams{
+		ID:           uuid.New().String(),
+		Timestamp:    time.Now().UTC(),
+		Action:       action,
+		ActorType:    actorType,
+		ActorID:      actorID,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+		Details:      details,
+	})
 }
 
 func (a *AuditDB) ListEntries(limit, offset int) ([]AuditEntry, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := a.db.Query(
-		"SELECT id, timestamp, action, actor_type, actor_id, resource_type, resource_id, details FROM audit_log ORDER BY timestamp DESC LIMIT ? OFFSET ?",
-		limit, offset,
-	)
+	rows, err := a.q.ListAuditEntries(context.Background(), sqlcdb.ListAuditEntriesParams{
+		Limit:  int64(limit),
+		Offset: int64(offset),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("query audit log: %w", err)
 	}
-	defer rows.Close()
-
-	var entries []AuditEntry
-	for rows.Next() {
-		var e AuditEntry
-		if err := rows.Scan(&e.ID, &e.Timestamp, &e.Action, &e.ActorType, &e.ActorID, &e.ResourceType, &e.ResourceID, &e.Details); err != nil {
-			return nil, fmt.Errorf("scan audit entry: %w", err)
+	entries := make([]AuditEntry, len(rows))
+	for i, r := range rows {
+		entries[i] = AuditEntry{
+			ID:           r.ID,
+			Timestamp:    r.Timestamp,
+			Action:       r.Action,
+			ActorType:    r.ActorType,
+			ActorID:      r.ActorID,
+			ResourceType: r.ResourceType,
+			ResourceID:   r.ResourceID,
+			Details:      r.Details,
 		}
-		entries = append(entries, e)
 	}
-	return entries, rows.Err()
+	return entries, nil
 }
 
 func (a *AuditDB) CountEntries() (int, error) {
-	var count int
-	err := a.db.QueryRow("SELECT COUNT(*) FROM audit_log").Scan(&count)
-	return count, err
+	count, err := a.q.CountAuditEntries(context.Background())
+	return int(count), err
 }

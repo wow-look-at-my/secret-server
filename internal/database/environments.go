@@ -1,11 +1,13 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	sqlcdb "github.com/wow-look-at-my/secret-server/internal/database/sqlc"
 )
 
 type Environment struct {
@@ -18,10 +20,12 @@ type Environment struct {
 func (d *DB) CreateEnvironment(project, environment string) (*Environment, error) {
 	id := uuid.New().String()
 	now := time.Now().UTC()
-	_, err := d.db.Exec(
-		"INSERT INTO environments (id, project, environment, created_at) VALUES (?, ?, ?, ?)",
-		id, project, environment, now,
-	)
+	err := d.q.CreateEnvironment(context.Background(), sqlcdb.CreateEnvironmentParams{
+		ID:          id,
+		Project:     project,
+		Environment: environment,
+		CreatedAt:   now,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("insert environment: %w", err)
 	}
@@ -29,44 +33,34 @@ func (d *DB) CreateEnvironment(project, environment string) (*Environment, error
 }
 
 func (d *DB) GetEnvironment(id string) (*Environment, error) {
-	var e Environment
-	err := d.db.QueryRow(
-		"SELECT id, project, environment, created_at FROM environments WHERE id = ?", id,
-	).Scan(&e.ID, &e.Project, &e.Environment, &e.CreatedAt)
+	row, err := d.q.GetEnvironment(context.Background(), id)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("query environment: %w", err)
 	}
-	return &e, nil
+	return &Environment{ID: row.ID, Project: row.Project, Environment: row.Environment, CreatedAt: row.CreatedAt}, nil
 }
 
 func (d *DB) ListEnvironments() ([]Environment, error) {
-	rows, err := d.db.Query(
-		"SELECT id, project, environment, created_at FROM environments ORDER BY project, environment",
-	)
+	rows, err := d.q.ListEnvironments(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("query environments: %w", err)
 	}
-	defer rows.Close()
-
-	var envs []Environment
-	for rows.Next() {
-		var e Environment
-		if err := rows.Scan(&e.ID, &e.Project, &e.Environment, &e.CreatedAt); err != nil {
-			return nil, fmt.Errorf("scan environment: %w", err)
-		}
-		envs = append(envs, e)
+	envs := make([]Environment, len(rows))
+	for i, r := range rows {
+		envs[i] = Environment{ID: r.ID, Project: r.Project, Environment: r.Environment, CreatedAt: r.CreatedAt}
 	}
-	return envs, rows.Err()
+	return envs, nil
 }
 
 func (d *DB) UpdateEnvironment(id, project, environment string) error {
-	result, err := d.db.Exec(
-		"UPDATE environments SET project = ?, environment = ? WHERE id = ?",
-		project, environment, id,
-	)
+	result, err := d.q.UpdateEnvironment(context.Background(), sqlcdb.UpdateEnvironmentParams{
+		Project:     project,
+		Environment: environment,
+		ID:          id,
+	})
 	if err != nil {
 		return fmt.Errorf("update environment: %w", err)
 	}
@@ -81,7 +75,7 @@ func (d *DB) UpdateEnvironment(id, project, environment string) error {
 }
 
 func (d *DB) DeleteEnvironment(id string) error {
-	result, err := d.db.Exec("DELETE FROM environments WHERE id = ?", id)
+	result, err := d.q.DeleteEnvironment(context.Background(), id)
 	if err != nil {
 		return err
 	}
@@ -97,19 +91,15 @@ func (d *DB) DeleteEnvironment(id string) error {
 
 // EnvironmentInUse checks whether any secrets or policies reference the given environment ID.
 func (d *DB) EnvironmentInUse(id string) (bool, error) {
-	var count int
-	err := d.db.QueryRow(
-		"SELECT COUNT(*) FROM secrets WHERE environment_id = ?", id,
-	).Scan(&count)
+	ctx := context.Background()
+	count, err := d.q.EnvironmentInUseSecrets(ctx, id)
 	if err != nil {
 		return false, err
 	}
 	if count > 0 {
 		return true, nil
 	}
-	err = d.db.QueryRow(
-		"SELECT COUNT(*) FROM access_policies WHERE environment_id = ?", id,
-	).Scan(&count)
+	count, err = d.q.EnvironmentInUsePolicies(ctx, id)
 	if err != nil {
 		return false, err
 	}
@@ -118,7 +108,6 @@ func (d *DB) EnvironmentInUse(id string) (bool, error) {
 
 // CountEnvironments returns the total number of environments.
 func (d *DB) CountEnvironments() (int, error) {
-	var count int
-	err := d.db.QueryRow("SELECT COUNT(*) FROM environments").Scan(&count)
-	return count, err
+	count, err := d.q.CountEnvironments(context.Background())
+	return int(count), err
 }
