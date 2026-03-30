@@ -167,6 +167,7 @@ func (h *UIHandler) editSecret(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UIHandler) createSecret(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
@@ -192,7 +193,7 @@ func (h *UIHandler) createSecret(w http.ResponseWriter, r *http.Request) {
 		envs, _ := h.db.ListEnvironments()
 		h.tmpl.Render(w, r, "secret_form.html", map[string]any{
 			"IsNew":        true,
-			"Error":        "Failed to create secret: " + err.Error(),
+			"Error":        "Failed to create secret. Check server logs for details.",
 			"Form":         r.Form,
 			"Environments": envs,
 		})
@@ -213,6 +214,7 @@ func (h *UIHandler) createSecret(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UIHandler) updateSecret(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	id := chi.URLParam(r, "id")
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
@@ -322,6 +324,7 @@ func (h *UIHandler) editPolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UIHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
@@ -352,7 +355,7 @@ func (h *UIHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
 		envs, _ := h.db.ListEnvironments()
 		h.tmpl.Render(w, r, "policy_form.html", map[string]any{
 			"IsNew":        true,
-			"Error":        "Failed to create policy: " + err.Error(),
+			"Error":        "Failed to create policy. Check server logs for details.",
 			"Form":         r.Form,
 			"Environments": envs,
 		})
@@ -373,6 +376,7 @@ func (h *UIHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UIHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	id := chi.URLParam(r, "id")
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
@@ -470,6 +474,7 @@ func (h *UIHandler) editEnvironment(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UIHandler) createEnvironment(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
@@ -489,7 +494,7 @@ func (h *UIHandler) createEnvironment(w http.ResponseWriter, r *http.Request) {
 		slog.Error("create environment failed", "error", err)
 		h.tmpl.Render(w, r, "environment_form.html", map[string]any{
 			"IsNew": true,
-			"Error": "Failed to create environment: " + err.Error(),
+			"Error": "Failed to create environment. Check server logs for details.",
 			"Form":  r.Form,
 		})
 		return
@@ -504,6 +509,7 @@ func (h *UIHandler) createEnvironment(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UIHandler) updateEnvironment(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	id := chi.URLParam(r, "id")
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
@@ -531,7 +537,7 @@ func (h *UIHandler) updateEnvironment(w http.ResponseWriter, r *http.Request) {
 		h.tmpl.Render(w, r, "environment_form.html", map[string]any{
 			"IsNew":       false,
 			"Environment": env,
-			"Error":       "Failed to update environment: " + err.Error(),
+			"Error":       "Failed to update environment. Check server logs for details.",
 			"Form":        r.Form,
 		})
 		return

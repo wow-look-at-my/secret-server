@@ -3,6 +3,8 @@ package handlers
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -101,6 +103,13 @@ func setupClosedMainDB(t *testing.T) *testEnv {
 	env := setup(t)
 	env.db.Close()
 	return env
+}
+
+// jsonReq creates an httptest request with Content-Type: application/json.
+func jsonReq(method, target, body string) *http.Request {
+	req := httptest.NewRequest(method, target, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	return req
 }
 
 func makeOIDCToken(t *testing.T, jwk jose.JSONWebKey, repo, ref string) string {
