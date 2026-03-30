@@ -370,6 +370,10 @@ func (h *UIHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
 	if refPattern == "" {
 		refPattern = "*"
 	}
+	actorPattern := r.FormValue("actor_pattern")
+	if actorPattern == "" {
+		actorPattern = "*"
+	}
 	envID, err := h.resolveEnvID(r)
 	if err != nil {
 		envs, _ := h.db.ListEnvironments()
@@ -385,6 +389,7 @@ func (h *UIHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
 		r.FormValue("name"),
 		r.FormValue("repository_pattern"),
 		refPattern,
+		actorPattern,
 		envID,
 	)
 	if err != nil {
@@ -423,13 +428,17 @@ func (h *UIHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 	if refPattern == "" {
 		refPattern = "*"
 	}
+	actorPattern := r.FormValue("actor_pattern")
+	if actorPattern == "" {
+		actorPattern = "*"
+	}
 	envID, err := h.resolveEnvID(r)
 	if err != nil {
 		slog.Error("resolve env for policy update failed", "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	err = h.db.UpdatePolicy(id, r.FormValue("name"), r.FormValue("repository_pattern"), refPattern, envID)
+	err = h.db.UpdatePolicy(id, r.FormValue("name"), r.FormValue("repository_pattern"), refPattern, actorPattern, envID)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			http.NotFound(w, r)

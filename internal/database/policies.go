@@ -16,13 +16,14 @@ type Policy struct {
 	Name              string
 	RepositoryPattern string
 	RefPattern        string
+	ActorPattern      string
 	EnvironmentID     string
 	Project           string // derived via JOIN with environments
 	Environment       string // derived via JOIN with environments
 	CreatedAt         time.Time
 }
 
-func (d *DB) CreatePolicy(name, repoPattern, refPattern, environmentID string) (*Policy, error) {
+func (d *DB) CreatePolicy(name, repoPattern, refPattern, actorPattern, environmentID string) (*Policy, error) {
 	id := uuid.New().String()
 	now := time.Now().UTC()
 	err := d.q.CreatePolicy(context.Background(), sqlcdb.CreatePolicyParams{
@@ -30,6 +31,7 @@ func (d *DB) CreatePolicy(name, repoPattern, refPattern, environmentID string) (
 		Name:              name,
 		RepositoryPattern: repoPattern,
 		RefPattern:        refPattern,
+		ActorPattern:      actorPattern,
 		EnvironmentID:     environmentID,
 		CreatedAt:         now,
 	})
@@ -38,7 +40,8 @@ func (d *DB) CreatePolicy(name, repoPattern, refPattern, environmentID string) (
 	}
 	return &Policy{
 		ID: id, Name: name, RepositoryPattern: repoPattern,
-		RefPattern: refPattern, EnvironmentID: environmentID, CreatedAt: now,
+		RefPattern: refPattern, ActorPattern: actorPattern,
+		EnvironmentID: environmentID, CreatedAt: now,
 	}, nil
 }
 
@@ -55,6 +58,7 @@ func (d *DB) GetPolicy(id string) (*Policy, error) {
 		Name:              row.Name,
 		RepositoryPattern: row.RepositoryPattern,
 		RefPattern:        row.RefPattern,
+		ActorPattern:      row.ActorPattern,
 		EnvironmentID:     row.EnvironmentID,
 		Project:           row.Project,
 		Environment:       row.Environment,
@@ -74,6 +78,7 @@ func (d *DB) ListPolicies() ([]Policy, error) {
 			Name:              r.Name,
 			RepositoryPattern: r.RepositoryPattern,
 			RefPattern:        r.RefPattern,
+			ActorPattern:      r.ActorPattern,
 			EnvironmentID:     r.EnvironmentID,
 			Project:           r.Project,
 			Environment:       r.Environment,
@@ -83,11 +88,12 @@ func (d *DB) ListPolicies() ([]Policy, error) {
 	return policies, nil
 }
 
-func (d *DB) UpdatePolicy(id, name, repoPattern, refPattern, environmentID string) error {
+func (d *DB) UpdatePolicy(id, name, repoPattern, refPattern, actorPattern, environmentID string) error {
 	result, err := d.q.UpdatePolicy(context.Background(), sqlcdb.UpdatePolicyParams{
 		Name:              name,
 		RepositoryPattern: repoPattern,
 		RefPattern:        refPattern,
+		ActorPattern:      actorPattern,
 		EnvironmentID:     environmentID,
 		ID:                id,
 	})
@@ -119,8 +125,8 @@ func (d *DB) DeletePolicy(id string) error {
 	return nil
 }
 
-// MatchingPolicies returns policies that match the given repository and ref using glob patterns.
-func (d *DB) MatchingPolicies(repository, ref string) ([]Policy, error) {
+// MatchingPolicies returns policies that match the given repository, ref, and actor using glob patterns.
+func (d *DB) MatchingPolicies(repository, ref, actor string) ([]Policy, error) {
 	policies, err := d.ListPolicies()
 	if err != nil {
 		return nil, err
@@ -138,7 +144,12 @@ func (d *DB) MatchingPolicies(repository, ref string) ([]Policy, error) {
 			slog.Warn("invalid ref glob pattern in policy", "policy_id", p.ID, "pattern", p.RefPattern, "error", err)
 			continue
 		}
-		if repoMatch && refMatch {
+		actorMatch, err := matchGlob(p.ActorPattern, actor)
+		if err != nil {
+			slog.Warn("invalid actor glob pattern in policy", "policy_id", p.ID, "pattern", p.ActorPattern, "error", err)
+			continue
+		}
+		if repoMatch && refMatch && actorMatch {
 			matched = append(matched, p)
 		}
 	}

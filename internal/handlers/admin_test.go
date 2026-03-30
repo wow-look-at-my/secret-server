@@ -393,7 +393,7 @@ func TestAdminCreatePolicyInvalidEnvironment(t *testing.T) {
 func TestAdminUpdatePolicyInvalidEnvironment(t *testing.T) {
 	env := setup(t)
 	envID := env.envID(t, "app", "prod")
-	p, _ := env.db.CreatePolicy("test", "org/*", "*", envID)
+	p, _ := env.db.CreatePolicy("test", "org/*", "*", "*", envID)
 	h := NewAdminHandler(env.db, env.audit)
 	mux := chi.NewRouter()
 	h.Register(mux)

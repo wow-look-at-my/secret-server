@@ -13,6 +13,7 @@ type AccessPolicy struct {
 	Name              string
 	RepositoryPattern string
 	RefPattern        string
+	ActorPattern      string
 	EnvironmentID     string
 	CreatedAt         time.Time
 }

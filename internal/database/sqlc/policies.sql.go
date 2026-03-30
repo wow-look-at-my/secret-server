@@ -23,8 +23,8 @@ func (q *Queries) CountPolicies(ctx context.Context) (int64, error) {
 }
 
 const createPolicy = `-- name: CreatePolicy :exec
-INSERT INTO access_policies (id, name, repository_pattern, ref_pattern, environment_id, created_at)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO access_policies (id, name, repository_pattern, ref_pattern, actor_pattern, environment_id, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreatePolicyParams struct {
@@ -32,6 +32,7 @@ type CreatePolicyParams struct {
 	Name              string
 	RepositoryPattern string
 	RefPattern        string
+	ActorPattern      string
 	EnvironmentID     string
 	CreatedAt         time.Time
 }
@@ -42,6 +43,7 @@ func (q *Queries) CreatePolicy(ctx context.Context, arg CreatePolicyParams) erro
 		arg.Name,
 		arg.RepositoryPattern,
 		arg.RefPattern,
+		arg.ActorPattern,
 		arg.EnvironmentID,
 		arg.CreatedAt,
 	)
@@ -57,7 +59,7 @@ func (q *Queries) DeletePolicy(ctx context.Context, id string) (sql.Result, erro
 }
 
 const getPolicy = `-- name: GetPolicy :one
-SELECT p.id, p.name, p.repository_pattern, p.ref_pattern, p.environment_id, e.project, e.environment, p.created_at
+SELECT p.id, p.name, p.repository_pattern, p.ref_pattern, p.actor_pattern, p.environment_id, e.project, e.environment, p.created_at
 FROM access_policies p
 JOIN environments e ON e.id = p.environment_id
 WHERE p.id = ?
@@ -68,6 +70,7 @@ type GetPolicyRow struct {
 	Name              string
 	RepositoryPattern string
 	RefPattern        string
+	ActorPattern      string
 	EnvironmentID     string
 	Project           string
 	Environment       string
@@ -82,6 +85,7 @@ func (q *Queries) GetPolicy(ctx context.Context, id string) (GetPolicyRow, error
 		&i.Name,
 		&i.RepositoryPattern,
 		&i.RefPattern,
+		&i.ActorPattern,
 		&i.EnvironmentID,
 		&i.Project,
 		&i.Environment,
@@ -91,7 +95,7 @@ func (q *Queries) GetPolicy(ctx context.Context, id string) (GetPolicyRow, error
 }
 
 const listPolicies = `-- name: ListPolicies :many
-SELECT p.id, p.name, p.repository_pattern, p.ref_pattern, p.environment_id, e.project, e.environment, p.created_at
+SELECT p.id, p.name, p.repository_pattern, p.ref_pattern, p.actor_pattern, p.environment_id, e.project, e.environment, p.created_at
 FROM access_policies p
 JOIN environments e ON e.id = p.environment_id
 ORDER BY p.name
@@ -102,6 +106,7 @@ type ListPoliciesRow struct {
 	Name              string
 	RepositoryPattern string
 	RefPattern        string
+	ActorPattern      string
 	EnvironmentID     string
 	Project           string
 	Environment       string
@@ -122,6 +127,7 @@ func (q *Queries) ListPolicies(ctx context.Context) ([]ListPoliciesRow, error) {
 			&i.Name,
 			&i.RepositoryPattern,
 			&i.RefPattern,
+			&i.ActorPattern,
 			&i.EnvironmentID,
 			&i.Project,
 			&i.Environment,
@@ -141,7 +147,7 @@ func (q *Queries) ListPolicies(ctx context.Context) ([]ListPoliciesRow, error) {
 }
 
 const updatePolicy = `-- name: UpdatePolicy :execresult
-UPDATE access_policies SET name = ?, repository_pattern = ?, ref_pattern = ?, environment_id = ?
+UPDATE access_policies SET name = ?, repository_pattern = ?, ref_pattern = ?, actor_pattern = ?, environment_id = ?
 WHERE id = ?
 `
 
@@ -149,6 +155,7 @@ type UpdatePolicyParams struct {
 	Name              string
 	RepositoryPattern string
 	RefPattern        string
+	ActorPattern      string
 	EnvironmentID     string
 	ID                string
 }
@@ -158,6 +165,7 @@ func (q *Queries) UpdatePolicy(ctx context.Context, arg UpdatePolicyParams) (sql
 		arg.Name,
 		arg.RepositoryPattern,
 		arg.RefPattern,
+		arg.ActorPattern,
 		arg.EnvironmentID,
 		arg.ID,
 	)
