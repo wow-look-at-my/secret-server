@@ -12,6 +12,9 @@ import (
 //go:embed *.html
 var templateFS embed.FS
 
+//go:embed style.css
+var styleCSS []byte
+
 type Templates struct {
 	tmpl *template.Template
 }
@@ -27,6 +30,12 @@ func New(adminPrefix, version string) (*Templates, error) {
 		return nil, err
 	}
 	return &Templates{tmpl: tmpl}, nil
+}
+
+func (t *Templates) ServeCSS(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Write(styleCSS)
 }
 
 func (t *Templates) Render(w http.ResponseWriter, r *http.Request, name string, data any) {

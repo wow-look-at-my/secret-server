@@ -22,13 +22,13 @@
             <td><code>{{.Action}}</code></td>
             <td>{{.ActorType}}: {{.ActorID}}</td>
             <td>{{.ResourceType}}{{if .ResourceID}} {{.ResourceID}}{{end}}</td>
-            <td><code style="font-size:0.8rem; word-break:break-all;">{{.Details}}</code></td>
+            <td><code class="audit-details">{{.Details}}</code></td>
         </tr>
         {{end}}
     </tbody>
 </table>
 
-<div style="margin-top:1rem; display:flex; gap:1rem;">
+<div class="pagination">
     {{if .HasPrev}}<a href="{{prefix}}/audit?page={{.PrevPage}}" class="btn">Previous</a>{{end}}
     {{if .HasNext}}<a href="{{prefix}}/audit?page={{.NextPage}}" class="btn">Next</a>{{end}}
 </div>
