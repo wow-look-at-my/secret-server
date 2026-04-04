@@ -35,7 +35,7 @@ func uiSecurityHeaders(next http.Handler) http.Handler {
 	csp := strings.Join([]string{
 		"default-src 'none'",
 		"script-src 'unsafe-inline'",
-		"style-src 'unsafe-inline'",
+		"style-src 'self' 'unsafe-inline'",
 		"frame-ancestors 'none'",
 	}, "; ")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
