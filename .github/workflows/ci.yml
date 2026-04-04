@@ -12,13 +12,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Restore coverage watermark from file
-        run: |
-          if [ -f .go-toolchain-watermark ]; then
-            python3 -c "
-          import os
-          val = open('.go-toolchain-watermark').read().strip()
-          os.setxattr('.', 'user.go-toolchain.watermark', val.encode())
-          "
-          fi
       - uses: wow-look-at-my/go-toolchain@v1
