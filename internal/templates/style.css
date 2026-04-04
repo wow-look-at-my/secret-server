@@ -122,3 +122,6 @@ form.inline { display: inline; }
 .toolbar-actions { display: flex; gap: 0.5rem; align-items: center; }
 h2.section-heading { margin-bottom: 0.5rem; }
 footer { text-align: center; padding: 1.5rem; font-size: 0.75rem; color: var(--muted); }
+footer .github-link { color: var(--muted); margin-left: 0.35rem; vertical-align: middle; }
+footer .github-link:hover { color: var(--fg); }
+footer .github-link svg { width: 1em; height: 1em; vertical-align: middle; }
