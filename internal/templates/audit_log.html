@@ -20,9 +20,28 @@
         <tr>
             <td>{{.Timestamp.Format "2006-01-02 15:04:05"}}</td>
             <td><code>{{.Action}}</code></td>
-            <td>{{.ActorType}}: {{.ActorID}}</td>
+            <td>
+                {{.ActorDisplay}}
+                {{if .ActorSubtext}}<br><span class="actor-subtext">{{.ActorSubtext}}</span>{{end}}
+            </td>
             <td>{{.ResourceType}}{{if .ResourceID}} {{.ResourceID}}{{end}}</td>
-            <td><code class="audit-details">{{.Details}}</code></td>
+            <td>
+                {{if .DetailsMap}}
+                    <span class="audit-summary">{{.DetailsSummary}}</span>
+                    {{if .DetailsMap}}
+                    <details class="json-details">
+                        <summary>details</summary>
+                        <dl class="detail-list">
+                            {{range $k, $v := .DetailsMap}}
+                            <div><dt>{{$k}}</dt><dd>{{fmtval $v}}</dd></div>
+                            {{end}}
+                        </dl>
+                    </details>
+                    {{end}}
+                {{else}}
+                    <code class="audit-details">{{.Details}}</code>
+                {{end}}
+            </td>
         </tr>
         {{end}}
     </tbody>

@@ -2,6 +2,8 @@ package templates
 
 import (
 	"embed"
+	"encoding/json"
+	"fmt"
 	"html/template"
 	"log/slog"
 	"net/http"
@@ -24,6 +26,22 @@ func New(adminPrefix, version string) (*Templates, error) {
 		"prefix":    func() string { return adminPrefix },
 		"version":   func() string { return version },
 		"csrfToken": func() string { return "" }, // placeholder, overridden per-render
+		"fmtval": func(v any) string {
+			switch val := v.(type) {
+			case string:
+				return val
+			case float64:
+				if val == float64(int64(val)) {
+					return fmt.Sprintf("%d", int64(val))
+				}
+				return fmt.Sprintf("%g", val)
+			case []any:
+				b, _ := json.Marshal(val)
+				return string(b)
+			default:
+				return fmt.Sprintf("%v", val)
+			}
+		},
 	}
 	tmpl, err := template.New("").Funcs(funcs).ParseFS(templateFS, "*.html")
 	if err != nil {
