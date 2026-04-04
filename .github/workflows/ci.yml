@@ -9,5 +9,3 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: wow-look-at-my/go-toolchain@v1
-        with:
-          private-org-token: ${{ secrets.PRIVATE_ORG_REPO_READ }}
