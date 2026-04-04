@@ -45,3 +45,5 @@ All via environment variables. Required: `ENCRYPTION_KEY`, `CF_ACCESS_TEAM_DOMAI
 ## CI
 
 Downloads `go-toolchain` binary in CI and runs it. Triggered on every push. No PRs merge without passing CI.
+
+Coverage watermark is stored in `.go-toolchain-watermark` (committed to git). The CI workflow restores this as an xattr before running go-toolchain so coverage enforcement uses the ratcheted minimum instead of the 80% default.
