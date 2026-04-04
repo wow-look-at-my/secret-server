@@ -662,7 +662,7 @@ func (h *UIHandler) auditLog(w http.ResponseWriter, r *http.Request) {
 	total, _ := h.audit.CountEntries()
 
 	h.tmpl.Render(w, r, "audit_log.html", map[string]any{
-		"Entries":  entries,
+		"Entries":  toAuditViews(entries),
 		"Page":     page,
 		"HasNext":  offset+perPage < total,
 		"HasPrev":  page > 1,
