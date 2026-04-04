@@ -566,6 +566,29 @@ func TestUIAuditLogPage(t *testing.T) {
 	assert.Contains(t, rr.Body.String(), "user@test.com")
 }
 
+func TestUIAuditLogGitHubActionsActor(t *testing.T) {
+	env := setup(t)
+	env.audit.CreateEntry("secret.access", "github_actions", "wow-look-at-my/secret-server", "secret", "",
+		`{"repository":"wow-look-at-my/secret-server","ref":"refs/heads/main","actor":"PazerOP","workflow":"Test Action","policies":["abc"],"secrets_count":4}`)
+
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	req := httptest.NewRequest("GET", "/admin/audit", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+	body := rr.Body.String()
+	// Actor column should show human actor prominently, repo as subtext.
+	assert.Contains(t, body, "PazerOP")
+	assert.Contains(t, body, "wow-look-at-my/secret-server")
+	assert.Contains(t, body, "actor-subtext")
+	// Summary should show workflow and secrets count.
+	assert.Contains(t, body, "workflow: Test Action")
+	assert.Contains(t, body, "4 secrets")
+}
+
 func TestUIAuditLogPageEmpty(t *testing.T) {
 	env := setup(t)
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
