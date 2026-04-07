@@ -83,9 +83,9 @@ func (d *DB) migrate() error {
 			CREATE TABLE IF NOT EXISTS access_policies (
 				id TEXT PRIMARY KEY,
 				name TEXT NOT NULL,
-				repository_pattern TEXT NOT NULL,
-				ref_pattern TEXT NOT NULL DEFAULT '*',
-				actor_pattern TEXT NOT NULL DEFAULT '*',
+				repository_patterns TEXT NOT NULL DEFAULT '[]',
+				ref_patterns TEXT NOT NULL DEFAULT '["*"]',
+				actor_patterns TEXT NOT NULL DEFAULT '["*"]',
 				environment_id TEXT NOT NULL REFERENCES environments(id),
 				created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 			);
@@ -103,35 +103,95 @@ func (d *DB) migrate() error {
 		return fmt.Errorf("migrate actor_pattern: %w", err)
 	}
 
+	// Convert singular *_pattern columns to JSON-array *_patterns columns.
+	if err := d.migratePolicyPatternLists(); err != nil {
+		return fmt.Errorf("migrate policy pattern lists: %w", err)
+	}
+
 	return nil
 }
 
-func (d *DB) migrateActorPattern() error {
+// hasPolicyColumn reports whether the access_policies table has a column
+// with the given name. Used to guard idempotent schema migrations.
+func (d *DB) hasPolicyColumn(name string) (bool, error) {
 	rows, err := d.db.Query("PRAGMA table_info(access_policies)")
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer rows.Close()
 
 	for rows.Next() {
 		var cid int
-		var name, typ string
+		var colName, typ string
 		var notnull int
 		var dflt sql.NullString
 		var pk int
-		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
-			return err
+		if err := rows.Scan(&cid, &colName, &typ, &notnull, &dflt, &pk); err != nil {
+			return false, err
 		}
-		if name == "actor_pattern" {
-			return nil // already migrated
+		if colName == name {
+			return true, rows.Err()
 		}
 	}
-	if err := rows.Err(); err != nil {
+	return false, rows.Err()
+}
+
+func (d *DB) migrateActorPattern() error {
+	// On the new schema we store actor_patterns (plural JSON array);
+	// the legacy actor_pattern column is no longer needed.
+	if has, err := d.hasPolicyColumn("actor_patterns"); err != nil {
 		return err
+	} else if has {
+		return nil
 	}
 
-	_, err = d.db.Exec("ALTER TABLE access_policies ADD COLUMN actor_pattern TEXT NOT NULL DEFAULT '*'")
+	if has, err := d.hasPolicyColumn("actor_pattern"); err != nil {
+		return err
+	} else if has {
+		return nil
+	}
+
+	_, err := d.db.Exec("ALTER TABLE access_policies ADD COLUMN actor_pattern TEXT NOT NULL DEFAULT '*'")
 	return err
+}
+
+// migratePolicyPatternLists replaces the singular repository_pattern,
+// ref_pattern, and actor_pattern columns with JSON-array columns
+// repository_patterns, ref_patterns, and actor_patterns. Existing values
+// are preserved as single-element JSON arrays. Idempotent.
+func (d *DB) migratePolicyPatternLists() error {
+	if has, err := d.hasPolicyColumn("repository_patterns"); err != nil {
+		return err
+	} else if has {
+		return nil
+	}
+
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmts := []string{
+		`ALTER TABLE access_policies ADD COLUMN repository_patterns TEXT NOT NULL DEFAULT '[]'`,
+		`ALTER TABLE access_policies ADD COLUMN ref_patterns TEXT NOT NULL DEFAULT '["*"]'`,
+		`ALTER TABLE access_policies ADD COLUMN actor_patterns TEXT NOT NULL DEFAULT '["*"]'`,
+		`UPDATE access_policies SET
+			repository_patterns = json_array(repository_pattern),
+			ref_patterns = json_array(ref_pattern),
+			actor_patterns = json_array(actor_pattern)`,
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.Exec(stmt); err != nil {
+			snippet := stmt
+			if len(snippet) > 40 {
+				snippet = snippet[:40]
+			}
+			return fmt.Errorf("exec %q: %w", snippet, err)
+		}
+	}
+
+	return tx.Commit()
 }
 
 // hasOldSchema returns true if the secrets table has a "project" column

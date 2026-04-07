@@ -38,7 +38,7 @@ func TestPublicFetchSecretsWithPolicy(t *testing.T) {
 
 	envID := env.envID(t, "myapp", "prod")
 	env.db.CreateSecret("DB_URL", "postgres://localhost", envID)
-	env.db.CreatePolicy("allow", "myorg/*", "*", "*", envID)
+	env.db.CreatePolicy("allow", []string{"myorg/*"}, []string{"*"}, []string{"*"}, envID)
 
 	h := NewPublicHandler(env.db, env.audit, env.oidc)
 	mux := chi.NewRouter()
@@ -70,7 +70,7 @@ func TestPublicFetchSecretsNoMatchingPolicy(t *testing.T) {
 	env := setup(t)
 	envID := env.envID(t, "app", "prod")
 	env.db.CreateSecret("KEY", "val", envID)
-	env.db.CreatePolicy("other", "otherorg/*", "*", "*", envID)
+	env.db.CreatePolicy("other", []string{"otherorg/*"}, []string{"*"}, []string{"*"}, envID)
 
 	h := NewPublicHandler(env.db, env.audit, env.oidc)
 	mux := chi.NewRouter()
@@ -147,8 +147,8 @@ func TestPublicFetchSecretsMultiplePoliciesSameProjectEnv(t *testing.T) {
 	envID := env.envID(t, "app", "prod")
 	env.db.CreateSecret("KEY1", "val1", envID)
 	env.db.CreateSecret("KEY2", "val2", envID)
-	env.db.CreatePolicy("p1", "myorg/*", "*", "*", envID)
-	env.db.CreatePolicy("p2", "myorg/*", "refs/heads/*", "*", envID)
+	env.db.CreatePolicy("p1", []string{"myorg/*"}, []string{"*"}, []string{"*"}, envID)
+	env.db.CreatePolicy("p2", []string{"myorg/*"}, []string{"refs/heads/*"}, []string{"*"}, envID)
 
 	h := NewPublicHandler(env.db, env.audit, env.oidc)
 	mux := chi.NewRouter()
@@ -175,8 +175,8 @@ func TestPublicFetchSecretsMultipleProjectEnvs(t *testing.T) {
 	envStaging := env.envID(t, "app", "staging")
 	env.db.CreateSecret("KEY_A", "a", envProd)
 	env.db.CreateSecret("KEY_B", "b", envStaging)
-	env.db.CreatePolicy("p1", "myorg/*", "*", "*", envProd)
-	env.db.CreatePolicy("p2", "myorg/*", "*", "*", envStaging)
+	env.db.CreatePolicy("p1", []string{"myorg/*"}, []string{"*"}, []string{"*"}, envProd)
+	env.db.CreatePolicy("p2", []string{"myorg/*"}, []string{"*"}, []string{"*"}, envStaging)
 
 	h := NewPublicHandler(env.db, env.audit, env.oidc)
 	mux := chi.NewRouter()
@@ -201,7 +201,7 @@ func TestPublicFetchSecretsActorPatternMatch(t *testing.T) {
 
 	envID := env.envID(t, "myapp", "prod")
 	env.db.CreateSecret("DB_URL", "postgres://localhost", envID)
-	env.db.CreatePolicy("allow-deployer", "myorg/*", "*", "deploy-*", envID)
+	env.db.CreatePolicy("allow-deployer", []string{"myorg/*"}, []string{"*"}, []string{"deploy-*"}, envID)
 
 	h := NewPublicHandler(env.db, env.audit, env.oidc)
 	mux := chi.NewRouter()
@@ -226,7 +226,7 @@ func TestPublicFetchSecretsActorPatternNoMatch(t *testing.T) {
 
 	envID := env.envID(t, "myapp", "prod")
 	env.db.CreateSecret("DB_URL", "postgres://localhost", envID)
-	env.db.CreatePolicy("allow-deployer", "myorg/*", "*", "deploy-*", envID)
+	env.db.CreatePolicy("allow-deployer", []string{"myorg/*"}, []string{"*"}, []string{"deploy-*"}, envID)
 
 	h := NewPublicHandler(env.db, env.audit, env.oidc)
 	mux := chi.NewRouter()

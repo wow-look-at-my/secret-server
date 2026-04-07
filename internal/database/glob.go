@@ -1,6 +1,9 @@
 package database
 
-import "path"
+import (
+	"fmt"
+	"path"
+)
 
 // matchGlob matches a pattern against a value using path.Match semantics.
 // The pattern can use * to match any sequence within a path segment,
@@ -15,4 +18,15 @@ func matchGlob(pattern, value string) (bool, error) {
 		return true, nil
 	}
 	return path.Match(pattern, value)
+}
+
+// ValidatePatterns returns a non-nil error if any pattern in the slice
+// is syntactically invalid under path.Match.
+func ValidatePatterns(patterns []string) error {
+	for _, p := range patterns {
+		if _, err := path.Match(p, ""); err != nil {
+			return fmt.Errorf("invalid glob pattern %q: %w", p, err)
+		}
+	}
+	return nil
 }

@@ -23,7 +23,7 @@ reference the admin UI prefix.
 
 - **Encryption at rest**: Secrets are AES-256-GCM encrypted in SQLite, base64-encoded. Decrypted only in memory on retrieval.
 - **Managed environments**: Project/environment pairs are first-class entities with UUID primary keys. Secrets and policies reference them by `environment_id` (FK), not by string tuple. Environments can be renamed without updating referencing rows. Auto-migrated from legacy string-column schema on upgrade.
-- **Policy-based access**: Glob patterns on repository name + git ref determine which secrets a workflow can access.
+- **Policy-based access**: Each policy holds lists of glob patterns for repository name, git ref, and actor. A request matches a policy iff the repo matches any repo-pattern AND the ref matches any ref-pattern AND the actor matches any actor-pattern. Patterns are stored as JSON arrays in `repository_patterns` / `ref_patterns` / `actor_patterns` TEXT columns. An empty list acts as a wildcard. Legacy single-pattern columns are auto-migrated to single-element JSON arrays on upgrade.
 - **Pure-Go SQLite**: Uses `modernc.org/sqlite` (no CGO required). CGO is disabled in the build.
 - **sqlc codegen**: SQL queries live in `internal/database/sqlc/queries/*.sql`. Run `sqlc generate` to regenerate Go code after modifying queries. Never edit files in `internal/database/sqlc/` directly.
 

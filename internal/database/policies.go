@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -12,36 +13,81 @@ import (
 )
 
 type Policy struct {
-	ID                string
-	Name              string
-	RepositoryPattern string
-	RefPattern        string
-	ActorPattern      string
-	EnvironmentID     string
-	Project           string // derived via JOIN with environments
-	Environment       string // derived via JOIN with environments
-	CreatedAt         time.Time
+	ID                 string
+	Name               string
+	RepositoryPatterns []string
+	RefPatterns        []string
+	ActorPatterns      []string
+	EnvironmentID      string
+	Project            string // derived via JOIN with environments
+	Environment        string // derived via JOIN with environments
+	CreatedAt          time.Time
 }
 
-func (d *DB) CreatePolicy(name, repoPattern, refPattern, actorPattern, environmentID string) (*Policy, error) {
+// encodePatterns serializes a pattern list for storage. A nil slice is
+// stored as an empty JSON array so it round-trips cleanly.
+func encodePatterns(patterns []string) (string, error) {
+	if patterns == nil {
+		patterns = []string{}
+	}
+	b, err := json.Marshal(patterns)
+	if err != nil {
+		return "", fmt.Errorf("marshal patterns: %w", err)
+	}
+	return string(b), nil
+}
+
+// decodePatterns deserializes a JSON-array column into a slice. Invalid
+// or empty JSON yields a nil slice, which MatchingPolicies treats as
+// "match any value" (preserving the legacy single-pattern "*" default).
+func decodePatterns(s string) []string {
+	var out []string
+	if s == "" {
+		return nil
+	}
+	if err := json.Unmarshal([]byte(s), &out); err != nil {
+		slog.Warn("invalid patterns JSON in access policy", "raw", s, "error", err)
+		return nil
+	}
+	return out
+}
+
+func (d *DB) CreatePolicy(name string, repoPatterns, refPatterns, actorPatterns []string, environmentID string) (*Policy, error) {
+	repoJSON, err := encodePatterns(repoPatterns)
+	if err != nil {
+		return nil, err
+	}
+	refJSON, err := encodePatterns(refPatterns)
+	if err != nil {
+		return nil, err
+	}
+	actorJSON, err := encodePatterns(actorPatterns)
+	if err != nil {
+		return nil, err
+	}
+
 	id := uuid.New().String()
 	now := time.Now().UTC()
-	err := d.q.CreatePolicy(context.Background(), sqlcdb.CreatePolicyParams{
-		ID:                id,
-		Name:              name,
-		RepositoryPattern: repoPattern,
-		RefPattern:        refPattern,
-		ActorPattern:      actorPattern,
-		EnvironmentID:     environmentID,
-		CreatedAt:         now,
+	err = d.q.CreatePolicy(context.Background(), sqlcdb.CreatePolicyParams{
+		ID:                 id,
+		Name:               name,
+		RepositoryPatterns: repoJSON,
+		RefPatterns:        refJSON,
+		ActorPatterns:      actorJSON,
+		EnvironmentID:      environmentID,
+		CreatedAt:          now,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("insert policy: %w", err)
 	}
 	return &Policy{
-		ID: id, Name: name, RepositoryPattern: repoPattern,
-		RefPattern: refPattern, ActorPattern: actorPattern,
-		EnvironmentID: environmentID, CreatedAt: now,
+		ID:                 id,
+		Name:               name,
+		RepositoryPatterns: repoPatterns,
+		RefPatterns:        refPatterns,
+		ActorPatterns:      actorPatterns,
+		EnvironmentID:      environmentID,
+		CreatedAt:          now,
 	}, nil
 }
 
@@ -54,15 +100,15 @@ func (d *DB) GetPolicy(id string) (*Policy, error) {
 		return nil, fmt.Errorf("query policy: %w", err)
 	}
 	return &Policy{
-		ID:                row.ID,
-		Name:              row.Name,
-		RepositoryPattern: row.RepositoryPattern,
-		RefPattern:        row.RefPattern,
-		ActorPattern:      row.ActorPattern,
-		EnvironmentID:     row.EnvironmentID,
-		Project:           row.Project,
-		Environment:       row.Environment,
-		CreatedAt:         row.CreatedAt,
+		ID:                 row.ID,
+		Name:               row.Name,
+		RepositoryPatterns: decodePatterns(row.RepositoryPatterns),
+		RefPatterns:        decodePatterns(row.RefPatterns),
+		ActorPatterns:      decodePatterns(row.ActorPatterns),
+		EnvironmentID:      row.EnvironmentID,
+		Project:            row.Project,
+		Environment:        row.Environment,
+		CreatedAt:          row.CreatedAt,
 	}, nil
 }
 
@@ -74,28 +120,41 @@ func (d *DB) ListPolicies() ([]Policy, error) {
 	policies := make([]Policy, len(rows))
 	for i, r := range rows {
 		policies[i] = Policy{
-			ID:                r.ID,
-			Name:              r.Name,
-			RepositoryPattern: r.RepositoryPattern,
-			RefPattern:        r.RefPattern,
-			ActorPattern:      r.ActorPattern,
-			EnvironmentID:     r.EnvironmentID,
-			Project:           r.Project,
-			Environment:       r.Environment,
-			CreatedAt:         r.CreatedAt,
+			ID:                 r.ID,
+			Name:               r.Name,
+			RepositoryPatterns: decodePatterns(r.RepositoryPatterns),
+			RefPatterns:        decodePatterns(r.RefPatterns),
+			ActorPatterns:      decodePatterns(r.ActorPatterns),
+			EnvironmentID:      r.EnvironmentID,
+			Project:            r.Project,
+			Environment:        r.Environment,
+			CreatedAt:          r.CreatedAt,
 		}
 	}
 	return policies, nil
 }
 
-func (d *DB) UpdatePolicy(id, name, repoPattern, refPattern, actorPattern, environmentID string) error {
+func (d *DB) UpdatePolicy(id, name string, repoPatterns, refPatterns, actorPatterns []string, environmentID string) error {
+	repoJSON, err := encodePatterns(repoPatterns)
+	if err != nil {
+		return err
+	}
+	refJSON, err := encodePatterns(refPatterns)
+	if err != nil {
+		return err
+	}
+	actorJSON, err := encodePatterns(actorPatterns)
+	if err != nil {
+		return err
+	}
+
 	result, err := d.q.UpdatePolicy(context.Background(), sqlcdb.UpdatePolicyParams{
-		Name:              name,
-		RepositoryPattern: repoPattern,
-		RefPattern:        refPattern,
-		ActorPattern:      actorPattern,
-		EnvironmentID:     environmentID,
-		ID:                id,
+		Name:               name,
+		RepositoryPatterns: repoJSON,
+		RefPatterns:        refJSON,
+		ActorPatterns:      actorJSON,
+		EnvironmentID:      environmentID,
+		ID:                 id,
 	})
 	if err != nil {
 		return err
@@ -125,7 +184,10 @@ func (d *DB) DeletePolicy(id string) error {
 	return nil
 }
 
-// MatchingPolicies returns policies that match the given repository, ref, and actor using glob patterns.
+// MatchingPolicies returns policies that match the given repository, ref,
+// and actor. A policy matches when the value matches any of its listed
+// patterns for each field (AND across fields, OR within a field). An
+// empty list for a field acts as a wildcard.
 func (d *DB) MatchingPolicies(repository, ref, actor string) ([]Policy, error) {
 	policies, err := d.ListPolicies()
 	if err != nil {
@@ -134,19 +196,19 @@ func (d *DB) MatchingPolicies(repository, ref, actor string) ([]Policy, error) {
 
 	var matched []Policy
 	for _, p := range policies {
-		repoMatch, err := matchGlob(p.RepositoryPattern, repository)
+		repoMatch, err := anyMatch(p.RepositoryPatterns, repository)
 		if err != nil {
-			slog.Warn("invalid repository glob pattern in policy", "policy_id", p.ID, "pattern", p.RepositoryPattern, "error", err)
+			slog.Warn("invalid repository glob pattern in policy", "policy_id", p.ID, "patterns", p.RepositoryPatterns, "error", err)
 			continue
 		}
-		refMatch, err := matchGlob(p.RefPattern, ref)
+		refMatch, err := anyMatch(p.RefPatterns, ref)
 		if err != nil {
-			slog.Warn("invalid ref glob pattern in policy", "policy_id", p.ID, "pattern", p.RefPattern, "error", err)
+			slog.Warn("invalid ref glob pattern in policy", "policy_id", p.ID, "patterns", p.RefPatterns, "error", err)
 			continue
 		}
-		actorMatch, err := matchGlob(p.ActorPattern, actor)
+		actorMatch, err := anyMatch(p.ActorPatterns, actor)
 		if err != nil {
-			slog.Warn("invalid actor glob pattern in policy", "policy_id", p.ID, "pattern", p.ActorPattern, "error", err)
+			slog.Warn("invalid actor glob pattern in policy", "policy_id", p.ID, "patterns", p.ActorPatterns, "error", err)
 			continue
 		}
 		if repoMatch && refMatch && actorMatch {
@@ -154,4 +216,22 @@ func (d *DB) MatchingPolicies(repository, ref, actor string) ([]Policy, error) {
 		}
 	}
 	return matched, nil
+}
+
+// anyMatch returns true when value matches any of the given glob patterns.
+// An empty pattern list acts as a wildcard (returns true).
+func anyMatch(patterns []string, value string) (bool, error) {
+	if len(patterns) == 0 {
+		return true, nil
+	}
+	for _, p := range patterns {
+		ok, err := matchGlob(p, value)
+		if err != nil {
+			return false, err
+		}
+		if ok {
+			return true, nil
+		}
+	}
+	return false, nil
 }

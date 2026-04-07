@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -195,34 +196,57 @@ func (h *AdminHandler) deleteSecret(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// policyRequest is the JSON body for create/update policy endpoints.
+// RepositoryPatterns must be non-empty; RefPatterns and ActorPatterns
+// default to ["*"] (match anything) when omitted.
+type policyRequest struct {
+	Name               string   `json:"name"`
+	RepositoryPatterns []string `json:"repository_patterns"`
+	RefPatterns        []string `json:"ref_patterns"`
+	ActorPatterns      []string `json:"actor_patterns"`
+	EnvironmentID      string   `json:"environment_id"`
+}
+
+// normalize applies defaults and validates the pattern lists.
+func (req *policyRequest) normalize() error {
+	if len(req.RefPatterns) == 0 {
+		req.RefPatterns = []string{"*"}
+	}
+	if len(req.ActorPatterns) == 0 {
+		req.ActorPatterns = []string{"*"}
+	}
+	if err := database.ValidatePatterns(req.RepositoryPatterns); err != nil {
+		return err
+	}
+	if err := database.ValidatePatterns(req.RefPatterns); err != nil {
+		return err
+	}
+	if err := database.ValidatePatterns(req.ActorPatterns); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (h *AdminHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
 	if !requireJSON(w, r) {
 		return
 	}
-	var req struct {
-		Name              string `json:"name"`
-		RepositoryPattern string `json:"repository_pattern"`
-		RefPattern        string `json:"ref_pattern"`
-		ActorPattern      string `json:"actor_pattern"`
-		EnvironmentID     string `json:"environment_id"`
-	}
+	var req policyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
 		return
 	}
-	if req.Name == "" || req.RepositoryPattern == "" || req.EnvironmentID == "" {
-		http.Error(w, `{"error":"name, repository_pattern, and environment_id are required"}`, http.StatusBadRequest)
+	if req.Name == "" || len(req.RepositoryPatterns) == 0 || req.EnvironmentID == "" {
+		http.Error(w, `{"error":"name, repository_patterns, and environment_id are required"}`, http.StatusBadRequest)
 		return
 	}
 	if !validUUID(req.EnvironmentID) {
 		http.Error(w, `{"error":"environment_id must be a valid UUID"}`, http.StatusBadRequest)
 		return
 	}
-	if req.RefPattern == "" {
-		req.RefPattern = "*"
-	}
-	if req.ActorPattern == "" {
-		req.ActorPattern = "*"
+	if err := req.normalize(); err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
+		return
 	}
 
 	env, err := h.db.GetEnvironment(req.EnvironmentID)
@@ -235,13 +259,20 @@ func (h *AdminHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	policy, err := h.db.CreatePolicy(req.Name, req.RepositoryPattern, req.RefPattern, req.ActorPattern, req.EnvironmentID)
+	policy, err := h.db.CreatePolicy(req.Name, req.RepositoryPatterns, req.RefPatterns, req.ActorPatterns, req.EnvironmentID)
 	if err != nil {
 		http.Error(w, `{"error":"failed to create policy"}`, http.StatusInternalServerError)
 		return
 	}
 
-	details, _ := json.Marshal(map[string]string{"name": req.Name, "repository_pattern": req.RepositoryPattern, "project": env.Project, "environment": env.Environment})
+	details, _ := json.Marshal(map[string]any{
+		"name":                req.Name,
+		"repository_patterns": req.RepositoryPatterns,
+		"ref_patterns":        req.RefPatterns,
+		"actor_patterns":      req.ActorPatterns,
+		"project":             env.Project,
+		"environment":         env.Environment,
+	})
 	if err := h.audit.CreateEntry("policy.create", "admin", adminActor(r), "policy", policy.ID, string(details)); err != nil {
 		slog.Error("audit log failed", "error", err)
 	}
@@ -256,13 +287,7 @@ func (h *AdminHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := chi.URLParam(r, "id")
-	var req struct {
-		Name              string `json:"name"`
-		RepositoryPattern string `json:"repository_pattern"`
-		RefPattern        string `json:"ref_pattern"`
-		ActorPattern      string `json:"actor_pattern"`
-		EnvironmentID     string `json:"environment_id"`
-	}
+	var req policyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
 		return
@@ -273,8 +298,14 @@ func (h *AdminHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.ActorPattern == "" {
-		req.ActorPattern = "*"
+	if len(req.RepositoryPatterns) == 0 {
+		http.Error(w, `{"error":"repository_patterns must not be empty"}`, http.StatusBadRequest)
+		return
+	}
+
+	if err := req.normalize(); err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
+		return
 	}
 
 	env, err := h.db.GetEnvironment(req.EnvironmentID)
@@ -287,7 +318,7 @@ func (h *AdminHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.db.UpdatePolicy(id, req.Name, req.RepositoryPattern, req.RefPattern, req.ActorPattern, req.EnvironmentID); err != nil {
+	if err := h.db.UpdatePolicy(id, req.Name, req.RepositoryPatterns, req.RefPatterns, req.ActorPatterns, req.EnvironmentID); err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			http.Error(w, `{"error":"policy not found"}`, http.StatusNotFound)
 			return
@@ -296,7 +327,14 @@ func (h *AdminHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	details, _ := json.Marshal(map[string]string{"name": req.Name, "repository_pattern": req.RepositoryPattern, "project": env.Project, "environment": env.Environment})
+	details, _ := json.Marshal(map[string]any{
+		"name":                req.Name,
+		"repository_patterns": req.RepositoryPatterns,
+		"ref_patterns":        req.RefPatterns,
+		"actor_patterns":      req.ActorPatterns,
+		"project":             env.Project,
+		"environment":         env.Environment,
+	})
 	if err := h.audit.CreateEntry("policy.update", "admin", adminActor(r), "policy", id, string(details)); err != nil {
 		slog.Error("audit log failed", "error", err)
 	}

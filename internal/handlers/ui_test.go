@@ -15,7 +15,7 @@ func TestUIPages(t *testing.T) {
 	env := setup(t)
 	envID := env.envID(t, "app", "prod")
 	env.db.CreateSecret("KEY", "val", envID)
-	env.db.CreatePolicy("p", "org/*", "*", "*", envID)
+	env.db.CreatePolicy("p", []string{"org/*"}, []string{"*"}, []string{"*"}, envID)
 
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := chi.NewRouter()
@@ -109,7 +109,7 @@ func TestUIPolicyCreateEditDelete(t *testing.T) {
 	envIDProd := env.envID(t, "app", "prod")
 	envIDStaging := env.envID(t, "app", "staging")
 
-	form := "name=Test+Policy&repository_pattern=org/*&ref_pattern=*&env_id=" + envIDProd
+	form := "name=Test+Policy&repository_patterns=org/*&ref_patterns=*&env_id=" + envIDProd
 	req := httptest.NewRequest("POST", "/admin/policies", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
@@ -125,7 +125,7 @@ func TestUIPolicyCreateEditDelete(t *testing.T) {
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusOK, rr.Code)
 
-	form = "name=Updated+Policy&repository_pattern=org/*&ref_pattern=refs/heads/main&env_id=" + envIDStaging
+	form = "name=Updated+Policy&repository_patterns=org/*&ref_patterns=refs/heads/main&env_id=" + envIDStaging
 	req = httptest.NewRequest("POST", "/admin/policies/"+id, strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr = httptest.NewRecorder()
@@ -191,7 +191,7 @@ func TestUIUpdateNonexistentPolicy(t *testing.T) {
 	h.Register(mux)
 
 	envID := env.envID(t, "app", "prod")
-	form := "name=P&repository_pattern=org/*&ref_pattern=*&env_id=" + envID
+	form := "name=P&repository_patterns=org/*&ref_patterns=*&env_id=" + envID
 	req := httptest.NewRequest("POST", "/admin/policies/nonexistent", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
@@ -230,7 +230,7 @@ func TestUIPolicyCreateDefaultRefPattern(t *testing.T) {
 	h.Register(mux)
 
 	envID := env.envID(t, "app", "prod")
-	form := "name=NoRef&repository_pattern=org/*&env_id=" + envID
+	form := "name=NoRef&repository_patterns=org/*&env_id=" + envID
 	req := httptest.NewRequest("POST", "/admin/policies", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
@@ -239,7 +239,113 @@ func TestUIPolicyCreateDefaultRefPattern(t *testing.T) {
 
 	policies, _ := env.db.ListPolicies()
 	require.Equal(t, 1, len(policies))
-	assert.Equal(t, "*", policies[0].RefPattern)
+	assert.Equal(t, []string{"*"}, policies[0].RefPatterns)
+	assert.Equal(t, []string{"*"}, policies[0].ActorPatterns)
+}
+
+func TestUIPolicyCreateMultiPattern(t *testing.T) {
+	env := setup(t)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	envID := env.envID(t, "app", "prod")
+	// Textarea body: URL-encoded newline between patterns.
+	form := "name=Multi&repository_patterns=org/api-%2A%0Aorg/worker-%2A&ref_patterns=refs/heads/main%0Arefs/tags/v%2A&actor_patterns=deploy-%2A&env_id=" + envID
+	req := httptest.NewRequest("POST", "/admin/policies", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusSeeOther, rr.Code)
+
+	policies, _ := env.db.ListPolicies()
+	require.Equal(t, 1, len(policies))
+	assert.Equal(t, []string{"org/api-*", "org/worker-*"}, policies[0].RepositoryPatterns)
+	assert.Equal(t, []string{"refs/heads/main", "refs/tags/v*"}, policies[0].RefPatterns)
+	assert.Equal(t, []string{"deploy-*"}, policies[0].ActorPatterns)
+}
+
+func TestUIPolicyCreateInvalidGlob(t *testing.T) {
+	env := setup(t)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	envID := env.envID(t, "app", "prod")
+	form := "name=Bad&repository_patterns=org/%5B&env_id=" + envID
+	req := httptest.NewRequest("POST", "/admin/policies", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	// Form re-renders with 200 OK + error, no DB row created.
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Body.String(), "invalid glob pattern")
+
+	policies, _ := env.db.ListPolicies()
+	assert.Equal(t, 0, len(policies))
+}
+
+func TestUIPolicyCreateMissingRepoPatterns(t *testing.T) {
+	env := setup(t)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	envID := env.envID(t, "app", "prod")
+	form := "name=Empty&repository_patterns=&env_id=" + envID
+	req := httptest.NewRequest("POST", "/admin/policies", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Body.String(), "at least one repository pattern")
+
+	policies, _ := env.db.ListPolicies()
+	assert.Equal(t, 0, len(policies))
+}
+
+func TestUIPolicyUpdateMultiPattern(t *testing.T) {
+	env := setup(t)
+	envProd := env.envID(t, "app", "prod")
+	p, _ := env.db.CreatePolicy("test", []string{"org/*"}, []string{"*"}, []string{"*"}, envProd)
+
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	form := "name=Updated&repository_patterns=org/a%0Aorg/b&ref_patterns=refs/heads/main%0Arefs/tags/v%2A&actor_patterns=deploy-%2A&env_id=" + envProd
+	req := httptest.NewRequest("POST", "/admin/policies/"+p.ID, strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusSeeOther, rr.Code)
+
+	got, _ := env.db.GetPolicy(p.ID)
+	assert.Equal(t, []string{"org/a", "org/b"}, got.RepositoryPatterns)
+	assert.Equal(t, []string{"refs/heads/main", "refs/tags/v*"}, got.RefPatterns)
+	assert.Equal(t, []string{"deploy-*"}, got.ActorPatterns)
+}
+
+func TestUIPolicyUpdateInvalidGlob(t *testing.T) {
+	env := setup(t)
+	envProd := env.envID(t, "app", "prod")
+	p, _ := env.db.CreatePolicy("test", []string{"org/*"}, []string{"*"}, []string{"*"}, envProd)
+
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	form := "name=Updated&repository_patterns=org/%5B&env_id=" + envProd
+	req := httptest.NewRequest("POST", "/admin/policies/"+p.ID, strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Body.String(), "invalid glob pattern")
+
+	// Original policy unchanged.
+	got, _ := env.db.GetPolicy(p.ID)
+	assert.Equal(t, []string{"org/*"}, got.RepositoryPatterns)
 }
 
 func TestUIDashboardRedirectBadPath(t *testing.T) {
@@ -293,14 +399,14 @@ func TestUIListSecretsWithEnvFilter(t *testing.T) {
 func TestUIUpdatePolicyViaForm(t *testing.T) {
 	env := setup(t)
 	envProd := env.envID(t, "app", "prod")
-	p, _ := env.db.CreatePolicy("test", "org/*", "*", "*", envProd)
+	p, _ := env.db.CreatePolicy("test", []string{"org/*"}, []string{"*"}, []string{"*"}, envProd)
 
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := chi.NewRouter()
 	h.Register(mux)
 
 	envStaging := env.envID(t, "app", "staging")
-	form := "name=Updated&repository_pattern=org/*&ref_pattern=refs/heads/main&env_id=" + envStaging
+	form := "name=Updated&repository_patterns=org/*&ref_patterns=refs/heads/main&env_id=" + envStaging
 	req := httptest.NewRequest("POST", "/admin/policies/"+p.ID, strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
@@ -309,19 +415,19 @@ func TestUIUpdatePolicyViaForm(t *testing.T) {
 
 	got, _ := env.db.GetPolicy(p.ID)
 	assert.Equal(t, "Updated", got.Name)
-	assert.Equal(t, "refs/heads/main", got.RefPattern)
+	assert.Equal(t, []string{"refs/heads/main"}, got.RefPatterns)
 }
 
 func TestUIUpdatePolicyDefaultRefPattern(t *testing.T) {
 	env := setup(t)
 	envProd := env.envID(t, "app", "prod")
-	p, _ := env.db.CreatePolicy("test", "org/*", "refs/heads/main", "*", envProd)
+	p, _ := env.db.CreatePolicy("test", []string{"org/*"}, []string{"refs/heads/main"}, []string{"*"}, envProd)
 
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := chi.NewRouter()
 	h.Register(mux)
 
-	form := "name=Updated&repository_pattern=org/*&env_id=" + envProd
+	form := "name=Updated&repository_patterns=org/*&env_id=" + envProd
 	req := httptest.NewRequest("POST", "/admin/policies/"+p.ID, strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
@@ -329,7 +435,7 @@ func TestUIUpdatePolicyDefaultRefPattern(t *testing.T) {
 	assert.Equal(t, http.StatusSeeOther, rr.Code)
 
 	got, _ := env.db.GetPolicy(p.ID)
-	assert.Equal(t, "*", got.RefPattern)
+	assert.Equal(t, []string{"*"}, got.RefPatterns)
 }
 
 func TestUIDeleteSecretViaForm(t *testing.T) {
@@ -353,7 +459,7 @@ func TestUIDeleteSecretViaForm(t *testing.T) {
 func TestUIDeletePolicyViaForm(t *testing.T) {
 	env := setup(t)
 	envProd := env.envID(t, "app", "prod")
-	p, _ := env.db.CreatePolicy("del", "org/*", "*", "*", envProd)
+	p, _ := env.db.CreatePolicy("del", []string{"org/*"}, []string{"*"}, []string{"*"}, envProd)
 
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := chi.NewRouter()
@@ -444,7 +550,7 @@ func TestUICreatePolicyDBError(t *testing.T) {
 	mux := chi.NewRouter()
 	h.Register(mux)
 
-	form := "name=P&repository_pattern=org/*&ref_pattern=*&env_id=some-id"
+	form := "name=P&repository_patterns=org/*&ref_patterns=*&env_id=some-id"
 	req := httptest.NewRequest("POST", "/admin/policies", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
@@ -458,7 +564,7 @@ func TestUIUpdatePolicyDBError(t *testing.T) {
 	mux := chi.NewRouter()
 	h.Register(mux)
 
-	form := "name=P&repository_pattern=org/*&ref_pattern=*&env_id=some-id"
+	form := "name=P&repository_patterns=org/*&ref_patterns=*&env_id=some-id"
 	req := httptest.NewRequest("POST", "/admin/policies/some-id", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()

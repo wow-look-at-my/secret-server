@@ -19,9 +19,9 @@ CREATE TABLE IF NOT EXISTS secrets (
 CREATE TABLE IF NOT EXISTS access_policies (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    repository_pattern TEXT NOT NULL,
-    ref_pattern TEXT NOT NULL DEFAULT '*',
-    actor_pattern TEXT NOT NULL DEFAULT '*',
+    repository_patterns TEXT NOT NULL DEFAULT '[]',
+    ref_patterns TEXT NOT NULL DEFAULT '["*"]',
+    actor_patterns TEXT NOT NULL DEFAULT '["*"]',
     environment_id TEXT NOT NULL REFERENCES environments(id),
     created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );

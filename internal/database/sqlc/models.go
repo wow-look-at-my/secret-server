@@ -9,13 +9,13 @@ import (
 )
 
 type AccessPolicy struct {
-	ID                string
-	Name              string
-	RepositoryPattern string
-	RefPattern        string
-	ActorPattern      string
-	EnvironmentID     string
-	CreatedAt         time.Time
+	ID                 string
+	Name               string
+	RepositoryPatterns string
+	RefPatterns        string
+	ActorPatterns      string
+	EnvironmentID      string
+	CreatedAt          time.Time
 }
 
 type AuditLog struct {

@@ -16,27 +16,24 @@
     </div>
 
     <div class="form-group">
-        <label for="repository_pattern">Repository Pattern</label>
-        <input type="text" id="repository_pattern" name="repository_pattern" required
-            value="{{if .IsNew}}{{else}}{{.Policy.RepositoryPattern}}{{end}}"
-            placeholder="e.g. wow-look-at-my/* or owner/repo">
-        <div class="hint">GitHub repository to grant access to. Use owner/repo for a single repo, or owner/* for all repos in an org.</div>
+        <label for="repository_patterns">Repository Patterns</label>
+        <textarea id="repository_patterns" name="repository_patterns" required rows="3"
+            placeholder="wow-look-at-my/*&#10;owner/repo">{{if not .IsNew}}{{joinLines .Policy.RepositoryPatterns}}{{end}}</textarea>
+        <div class="hint">One glob per line. A request is allowed if the repository matches any of these. Use owner/repo for a single repo, or owner/* for all repos in an org.</div>
     </div>
 
     <div class="form-group">
-        <label for="ref_pattern">Ref Pattern</label>
-        <input type="text" id="ref_pattern" name="ref_pattern"
-            value="{{if .IsNew}}*{{else}}{{.Policy.RefPattern}}{{end}}"
-            placeholder="e.g. refs/heads/main or *">
-        <div class="hint">Git ref filter (e.g. refs/heads/main). Use * to allow any branch or tag.</div>
+        <label for="ref_patterns">Ref Patterns</label>
+        <textarea id="ref_patterns" name="ref_patterns" rows="3"
+            placeholder="refs/heads/main&#10;refs/tags/v*">{{if .IsNew}}*{{else}}{{joinLines .Policy.RefPatterns}}{{end}}</textarea>
+        <div class="hint">One glob per line. Git ref filter (e.g. refs/heads/main). Use * to allow any branch or tag. Leave blank to match any ref.</div>
     </div>
 
     <div class="form-group">
-        <label for="actor_pattern">Actor Pattern</label>
-        <input type="text" id="actor_pattern" name="actor_pattern"
-            value="{{if .IsNew}}*{{else}}{{.Policy.ActorPattern}}{{end}}"
-            placeholder="e.g. octocat, my-team-*, or *">
-        <div class="hint">GitHub username filter for who triggered the workflow. Use * to allow any actor.</div>
+        <label for="actor_patterns">Actor Patterns</label>
+        <textarea id="actor_patterns" name="actor_patterns" rows="3"
+            placeholder="octocat&#10;my-team-*">{{if .IsNew}}*{{else}}{{joinLines .Policy.ActorPatterns}}{{end}}</textarea>
+        <div class="hint">One glob per line. GitHub username filter for who triggered the workflow. Use * to allow any actor. Leave blank to match any actor.</div>
     </div>
 
     <div class="form-group">
