@@ -12,9 +12,9 @@
     <thead>
         <tr>
             <th>Name</th>
-            <th>Repository Pattern</th>
-            <th>Ref Pattern</th>
-            <th>Actor Pattern</th>
+            <th>Repository Patterns</th>
+            <th>Ref Patterns</th>
+            <th>Actor Patterns</th>
             <th>Project</th>
             <th>Environment</th>
             <th>Actions</th>
@@ -24,9 +24,9 @@
         {{range .}}
         <tr>
             <td>{{.Name}}</td>
-            <td><code>{{.RepositoryPattern}}</code></td>
-            <td><code>{{.RefPattern}}</code></td>
-            <td><code>{{.ActorPattern}}</code></td>
+            <td>{{range $i, $p := .RepositoryPatterns}}{{if $i}}, {{end}}<code>{{$p}}</code>{{end}}</td>
+            <td>{{range $i, $p := .RefPatterns}}{{if $i}}, {{end}}<code>{{$p}}</code>{{end}}</td>
+            <td>{{range $i, $p := .ActorPatterns}}{{if $i}}, {{end}}<code>{{$p}}</code>{{end}}</td>
             <td>{{.Project}}</td>
             <td>{{.Environment}}</td>
             <td>

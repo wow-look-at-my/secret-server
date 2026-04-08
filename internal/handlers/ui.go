@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -16,6 +17,18 @@ import (
 	"github.com/wow-look-at-my/secret-server/internal/database"
 	"github.com/wow-look-at-my/secret-server/internal/templates"
 )
+
+// parsePatternLines splits a textarea value into a slice of trimmed,
+// non-empty lines — one glob pattern per line.
+func parsePatternLines(s string) []string {
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		if t := strings.TrimSpace(line); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
 
 type UIHandler struct {
 	db    *database.DB
@@ -360,19 +373,46 @@ func (h *UIHandler) editPolicy(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// parsePolicyPatternsForm extracts and validates the three pattern lists
+// from an access-policy form submission. An empty ref/actor list defaults
+// to ["*"] so empty-field semantics match the legacy behavior.
+func parsePolicyPatternsForm(r *http.Request) (repo, ref, actor []string, err error) {
+	repo = parsePatternLines(r.FormValue("repository_patterns"))
+	ref = parsePatternLines(r.FormValue("ref_patterns"))
+	actor = parsePatternLines(r.FormValue("actor_patterns"))
+	if len(repo) == 0 {
+		return nil, nil, nil, fmt.Errorf("at least one repository pattern is required")
+	}
+	if len(ref) == 0 {
+		ref = []string{"*"}
+	}
+	if len(actor) == 0 {
+		actor = []string{"*"}
+	}
+	for _, list := range [][]string{repo, ref, actor} {
+		if err := database.ValidatePatterns(list); err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	return repo, ref, actor, nil
+}
+
 func (h *UIHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
-	refPattern := r.FormValue("ref_pattern")
-	if refPattern == "" {
-		refPattern = "*"
-	}
-	actorPattern := r.FormValue("actor_pattern")
-	if actorPattern == "" {
-		actorPattern = "*"
+	repoPatterns, refPatterns, actorPatterns, err := parsePolicyPatternsForm(r)
+	if err != nil {
+		envs, _ := h.db.ListEnvironments()
+		h.tmpl.Render(w, r, "policy_form.html", map[string]any{
+			"IsNew":        true,
+			"Error":        err.Error(),
+			"Form":         r.Form,
+			"Environments": envs,
+		})
+		return
 	}
 	envID, err := h.resolveEnvID(r)
 	if err != nil {
@@ -387,9 +427,9 @@ func (h *UIHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	policy, err := h.db.CreatePolicy(
 		r.FormValue("name"),
-		r.FormValue("repository_pattern"),
-		refPattern,
-		actorPattern,
+		repoPatterns,
+		refPatterns,
+		actorPatterns,
 		envID,
 	)
 	if err != nil {
@@ -409,7 +449,14 @@ func (h *UIHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
 	if env != nil {
 		project, environment = env.Project, env.Environment
 	}
-	details, _ := json.Marshal(map[string]string{"name": r.FormValue("name"), "repository_pattern": r.FormValue("repository_pattern"), "project": project, "environment": environment})
+	details, _ := json.Marshal(map[string]any{
+		"name":                r.FormValue("name"),
+		"repository_patterns": repoPatterns,
+		"ref_patterns":        refPatterns,
+		"actor_patterns":      actorPatterns,
+		"project":             project,
+		"environment":         environment,
+	})
 	if err := h.audit.CreateEntry("policy.create", "admin", uiActor(r), "policy", policy.ID, string(details)); err != nil {
 		slog.Error("audit log failed", "error", err)
 	}
@@ -424,13 +471,18 @@ func (h *UIHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
-	refPattern := r.FormValue("ref_pattern")
-	if refPattern == "" {
-		refPattern = "*"
-	}
-	actorPattern := r.FormValue("actor_pattern")
-	if actorPattern == "" {
-		actorPattern = "*"
+	repoPatterns, refPatterns, actorPatterns, err := parsePolicyPatternsForm(r)
+	if err != nil {
+		existing, _ := h.db.GetPolicy(id)
+		envs, _ := h.db.ListEnvironments()
+		h.tmpl.Render(w, r, "policy_form.html", map[string]any{
+			"IsNew":        false,
+			"Policy":       existing,
+			"Error":        err.Error(),
+			"Form":         r.Form,
+			"Environments": envs,
+		})
+		return
 	}
 	envID, err := h.resolveEnvID(r)
 	if err != nil {
@@ -438,7 +490,7 @@ func (h *UIHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	err = h.db.UpdatePolicy(id, r.FormValue("name"), r.FormValue("repository_pattern"), refPattern, actorPattern, envID)
+	err = h.db.UpdatePolicy(id, r.FormValue("name"), repoPatterns, refPatterns, actorPatterns, envID)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			http.NotFound(w, r)
@@ -454,7 +506,14 @@ func (h *UIHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 	if env != nil {
 		project, environment = env.Project, env.Environment
 	}
-	details, _ := json.Marshal(map[string]string{"name": r.FormValue("name"), "repository_pattern": r.FormValue("repository_pattern"), "project": project, "environment": environment})
+	details, _ := json.Marshal(map[string]any{
+		"name":                r.FormValue("name"),
+		"repository_patterns": repoPatterns,
+		"ref_patterns":        refPatterns,
+		"actor_patterns":      actorPatterns,
+		"project":             project,
+		"environment":         environment,
+	})
 	if err := h.audit.CreateEntry("policy.update", "admin", uiActor(r), "policy", id, string(details)); err != nil {
 		slog.Error("audit log failed", "error", err)
 	}

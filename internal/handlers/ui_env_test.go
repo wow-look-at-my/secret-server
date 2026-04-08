@@ -197,7 +197,7 @@ func TestUIPolicyCreateInvalidEnvID(t *testing.T) {
 	mux := chi.NewRouter()
 	h.Register(mux)
 
-	form := "name=P&repository_pattern=org/*"
+	form := "name=P&repository_patterns=org/*"
 	req := httptest.NewRequest("POST", "/admin/policies", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()

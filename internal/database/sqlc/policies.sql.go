@@ -23,27 +23,27 @@ func (q *Queries) CountPolicies(ctx context.Context) (int64, error) {
 }
 
 const createPolicy = `-- name: CreatePolicy :exec
-INSERT INTO access_policies (id, name, repository_pattern, ref_pattern, actor_pattern, environment_id, created_at)
+INSERT INTO access_policies (id, name, repository_patterns, ref_patterns, actor_patterns, environment_id, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreatePolicyParams struct {
-	ID                string
-	Name              string
-	RepositoryPattern string
-	RefPattern        string
-	ActorPattern      string
-	EnvironmentID     string
-	CreatedAt         time.Time
+	ID                 string
+	Name               string
+	RepositoryPatterns string
+	RefPatterns        string
+	ActorPatterns      string
+	EnvironmentID      string
+	CreatedAt          time.Time
 }
 
 func (q *Queries) CreatePolicy(ctx context.Context, arg CreatePolicyParams) error {
 	_, err := q.db.ExecContext(ctx, createPolicy,
 		arg.ID,
 		arg.Name,
-		arg.RepositoryPattern,
-		arg.RefPattern,
-		arg.ActorPattern,
+		arg.RepositoryPatterns,
+		arg.RefPatterns,
+		arg.ActorPatterns,
 		arg.EnvironmentID,
 		arg.CreatedAt,
 	)
@@ -59,22 +59,22 @@ func (q *Queries) DeletePolicy(ctx context.Context, id string) (sql.Result, erro
 }
 
 const getPolicy = `-- name: GetPolicy :one
-SELECT p.id, p.name, p.repository_pattern, p.ref_pattern, p.actor_pattern, p.environment_id, e.project, e.environment, p.created_at
+SELECT p.id, p.name, p.repository_patterns, p.ref_patterns, p.actor_patterns, p.environment_id, e.project, e.environment, p.created_at
 FROM access_policies p
 JOIN environments e ON e.id = p.environment_id
 WHERE p.id = ?
 `
 
 type GetPolicyRow struct {
-	ID                string
-	Name              string
-	RepositoryPattern string
-	RefPattern        string
-	ActorPattern      string
-	EnvironmentID     string
-	Project           string
-	Environment       string
-	CreatedAt         time.Time
+	ID                 string
+	Name               string
+	RepositoryPatterns string
+	RefPatterns        string
+	ActorPatterns      string
+	EnvironmentID      string
+	Project            string
+	Environment        string
+	CreatedAt          time.Time
 }
 
 func (q *Queries) GetPolicy(ctx context.Context, id string) (GetPolicyRow, error) {
@@ -83,9 +83,9 @@ func (q *Queries) GetPolicy(ctx context.Context, id string) (GetPolicyRow, error
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
-		&i.RepositoryPattern,
-		&i.RefPattern,
-		&i.ActorPattern,
+		&i.RepositoryPatterns,
+		&i.RefPatterns,
+		&i.ActorPatterns,
 		&i.EnvironmentID,
 		&i.Project,
 		&i.Environment,
@@ -95,22 +95,22 @@ func (q *Queries) GetPolicy(ctx context.Context, id string) (GetPolicyRow, error
 }
 
 const listPolicies = `-- name: ListPolicies :many
-SELECT p.id, p.name, p.repository_pattern, p.ref_pattern, p.actor_pattern, p.environment_id, e.project, e.environment, p.created_at
+SELECT p.id, p.name, p.repository_patterns, p.ref_patterns, p.actor_patterns, p.environment_id, e.project, e.environment, p.created_at
 FROM access_policies p
 JOIN environments e ON e.id = p.environment_id
 ORDER BY p.name
 `
 
 type ListPoliciesRow struct {
-	ID                string
-	Name              string
-	RepositoryPattern string
-	RefPattern        string
-	ActorPattern      string
-	EnvironmentID     string
-	Project           string
-	Environment       string
-	CreatedAt         time.Time
+	ID                 string
+	Name               string
+	RepositoryPatterns string
+	RefPatterns        string
+	ActorPatterns      string
+	EnvironmentID      string
+	Project            string
+	Environment        string
+	CreatedAt          time.Time
 }
 
 func (q *Queries) ListPolicies(ctx context.Context) ([]ListPoliciesRow, error) {
@@ -125,9 +125,9 @@ func (q *Queries) ListPolicies(ctx context.Context) ([]ListPoliciesRow, error) {
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
-			&i.RepositoryPattern,
-			&i.RefPattern,
-			&i.ActorPattern,
+			&i.RepositoryPatterns,
+			&i.RefPatterns,
+			&i.ActorPatterns,
 			&i.EnvironmentID,
 			&i.Project,
 			&i.Environment,
@@ -147,25 +147,25 @@ func (q *Queries) ListPolicies(ctx context.Context) ([]ListPoliciesRow, error) {
 }
 
 const updatePolicy = `-- name: UpdatePolicy :execresult
-UPDATE access_policies SET name = ?, repository_pattern = ?, ref_pattern = ?, actor_pattern = ?, environment_id = ?
+UPDATE access_policies SET name = ?, repository_patterns = ?, ref_patterns = ?, actor_patterns = ?, environment_id = ?
 WHERE id = ?
 `
 
 type UpdatePolicyParams struct {
-	Name              string
-	RepositoryPattern string
-	RefPattern        string
-	ActorPattern      string
-	EnvironmentID     string
-	ID                string
+	Name               string
+	RepositoryPatterns string
+	RefPatterns        string
+	ActorPatterns      string
+	EnvironmentID      string
+	ID                 string
 }
 
 func (q *Queries) UpdatePolicy(ctx context.Context, arg UpdatePolicyParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, updatePolicy,
 		arg.Name,
-		arg.RepositoryPattern,
-		arg.RefPattern,
-		arg.ActorPattern,
+		arg.RepositoryPatterns,
+		arg.RefPatterns,
+		arg.ActorPatterns,
 		arg.EnvironmentID,
 		arg.ID,
 	)

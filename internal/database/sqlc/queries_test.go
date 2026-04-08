@@ -32,8 +32,9 @@ func setupTestDB(t *testing.T) *sqlcdb.Queries {
 		);
 		CREATE TABLE access_policies (
 			id TEXT PRIMARY KEY, name TEXT NOT NULL,
-			repository_pattern TEXT NOT NULL, ref_pattern TEXT NOT NULL DEFAULT '*',
-			actor_pattern TEXT NOT NULL DEFAULT '*',
+			repository_patterns TEXT NOT NULL DEFAULT '[]',
+			ref_patterns TEXT NOT NULL DEFAULT '["*"]',
+			actor_patterns TEXT NOT NULL DEFAULT '["*"]',
 			environment_id TEXT NOT NULL REFERENCES environments(id),
 			created_at DATETIME NOT NULL
 		);
@@ -221,8 +222,8 @@ func TestPolicyQueries(t *testing.T) {
 	createEnv(t, q, "env-1", "proj", "prod")
 
 	err := q.CreatePolicy(ctx, sqlcdb.CreatePolicyParams{
-		ID: "p1", Name: "Allow prod", RepositoryPattern: "org/*",
-		RefPattern: "refs/heads/main", ActorPattern: "*",
+		ID: "p1", Name: "Allow prod", RepositoryPatterns: `["org/*"]`,
+		RefPatterns: `["refs/heads/main"]`, ActorPatterns: `["*"]`,
 		EnvironmentID: "env-1", CreatedAt: now,
 	})
 	require.Nil(t, err)
@@ -233,6 +234,7 @@ func TestPolicyQueries(t *testing.T) {
 	assert.Equal(t, "proj", p.Project)
 	assert.Equal(t, "prod", p.Environment)
 	assert.Equal(t, "env-1", p.EnvironmentID)
+	assert.Equal(t, `["org/*"]`, p.RepositoryPatterns)
 
 	policies, err := q.ListPolicies(ctx)
 	require.Nil(t, err)
@@ -243,8 +245,8 @@ func TestPolicyQueries(t *testing.T) {
 	assert.Equal(t, int64(1), count)
 
 	result, err := q.UpdatePolicy(ctx, sqlcdb.UpdatePolicyParams{
-		Name: "Updated", RepositoryPattern: "other/*", RefPattern: "*",
-		ActorPattern: "*", EnvironmentID: "env-1", ID: "p1",
+		Name: "Updated", RepositoryPatterns: `["other/*"]`, RefPatterns: `["*"]`,
+		ActorPatterns: `["*"]`, EnvironmentID: "env-1", ID: "p1",
 	})
 	require.Nil(t, err)
 	n, _ := result.RowsAffected()

@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	gorillacsrf "github.com/gorilla/csrf"
 )
@@ -26,6 +27,9 @@ func New(adminPrefix, version string) (*Templates, error) {
 		"prefix":    func() string { return adminPrefix },
 		"version":   func() string { return version },
 		"csrfToken": func() string { return "" }, // placeholder, overridden per-render
+		"joinLines": func(lines []string) string {
+			return strings.Join(lines, "\n")
+		},
 		"fmtval": func(v any) string {
 			switch val := v.(type) {
 			case string:

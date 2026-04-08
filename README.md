@@ -96,14 +96,21 @@ On upgrade from older versions, the schema is automatically migrated: existing p
 
 Policies control which GitHub Actions workflows can access which secrets. Each policy specifies:
 
-- **Repository pattern** — glob pattern matching repository names (e.g. `myorg/*`, `myorg/myrepo`)
-- **Ref pattern** — glob pattern matching git refs (e.g. `refs/heads/main`, `*`)
-- **Environment** — which secrets the policy grants access to (selected from managed environments, referenced by UUID)
+- **Repository patterns** — one or more glob patterns matching repository names (e.g. `myorg/*`, `myorg/api-*`). At least one is required. A request matches if the repository matches **any** of the listed globs.
+- **Ref patterns** — glob patterns matching git refs (e.g. `refs/heads/main`, `refs/tags/v*`). Leave empty or use `*` to allow any branch or tag.
+- **Actor patterns** — glob patterns matching the GitHub username that triggered the workflow (e.g. `deploy-*`). Leave empty or use `*` to allow any actor.
+- **Environment** — which secrets the policy grants access to (selected from managed environments, referenced by UUID).
+
+A policy matches a request iff the repository matches **any** repository pattern AND the ref matches **any** ref pattern AND the actor matches **any** actor pattern.
+
+In the web UI, enter one pattern per line in each textarea. In the JSON admin API, each field is a string array: `repository_patterns`, `ref_patterns`, `actor_patterns`.
 
 When a GitHub Actions workflow requests secrets, the server:
 1. Validates the OIDC token
-2. Finds policies matching the token's repository and ref claims
+2. Finds policies matching the token's repository, ref, and actor claims
 3. Returns secrets from matching project/environment pairs
+
+On upgrade from older versions, existing single-pattern columns are automatically migrated to the new JSON-array columns in-place; existing values become single-element arrays with no change in behavior.
 
 ## Cloudflare Access Setup
 

@@ -134,7 +134,7 @@ func TestAdminPolicyCRUD(t *testing.T) {
 	envIDProd := env.envID(t, "app", "prod")
 	envIDStaging := env.envID(t, "app", "staging")
 
-	body := `{"name":"test","repository_pattern":"org/*","environment_id":"` + envIDProd + `"}`
+	body := `{"name":"test","repository_patterns":["org/*"],"environment_id":"` + envIDProd + `"}`
 	req := jsonReq("POST", "/admin/v1/policies", body)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -150,7 +150,7 @@ func TestAdminPolicyCRUD(t *testing.T) {
 	assert.Equal(t, "policy.create", entries[0].Action)
 	assert.Equal(t, id, entries[0].ResourceID)
 
-	body = `{"name":"updated","repository_pattern":"org/*","ref_pattern":"*","environment_id":"` + envIDStaging + `"}`
+	body = `{"name":"updated","repository_patterns":["org/*"],"ref_patterns":["*"],"environment_id":"` + envIDStaging + `"}`
 	req = jsonReq("PUT", "/admin/v1/policies/"+id, body)
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -192,14 +192,106 @@ func TestAdminCreatePolicyDefaultRefPattern(t *testing.T) {
 	h.Register(mux)
 
 	envID := env.envID(t, "app", "prod")
-	body := `{"name":"test","repository_pattern":"org/*","environment_id":"` + envID + `"}`
+	body := `{"name":"test","repository_patterns":["org/*"],"environment_id":"` + envID + `"}`
 	req := jsonReq("POST", "/admin/v1/policies", body)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	require.Equal(t, http.StatusCreated, rr.Code)
 
 	policies, _ := env.db.ListPolicies()
-	assert.Equal(t, "*", policies[0].RefPattern)
+	assert.Equal(t, []string{"*"}, policies[0].RefPatterns)
+	assert.Equal(t, []string{"*"}, policies[0].ActorPatterns)
+}
+
+func TestAdminCreatePolicyMultiplePatterns(t *testing.T) {
+	env := setup(t)
+	h := NewAdminHandler(env.db, env.audit)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	envID := env.envID(t, "app", "prod")
+	body := `{"name":"multi","repository_patterns":["org/api-*","org/worker-*"],"ref_patterns":["refs/heads/main","refs/tags/v*"],"actor_patterns":["deploy-*"],"environment_id":"` + envID + `"}`
+	req := jsonReq("POST", "/admin/v1/policies", body)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusCreated, rr.Code)
+
+	policies, _ := env.db.ListPolicies()
+	require.Equal(t, 1, len(policies))
+	assert.Equal(t, []string{"org/api-*", "org/worker-*"}, policies[0].RepositoryPatterns)
+	assert.Equal(t, []string{"refs/heads/main", "refs/tags/v*"}, policies[0].RefPatterns)
+	assert.Equal(t, []string{"deploy-*"}, policies[0].ActorPatterns)
+}
+
+func TestAdminCreatePolicyInvalidGlob(t *testing.T) {
+	env := setup(t)
+	h := NewAdminHandler(env.db, env.audit)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	envID := env.envID(t, "app", "prod")
+	body := `{"name":"bad","repository_patterns":["org/["],"environment_id":"` + envID + `"}`
+	req := jsonReq("POST", "/admin/v1/policies", body)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	assert.Contains(t, rr.Body.String(), "invalid glob pattern")
+}
+
+func TestAdminUpdatePolicyMultiPattern(t *testing.T) {
+	env := setup(t)
+	envID := env.envID(t, "app", "prod")
+	p, _ := env.db.CreatePolicy("test", []string{"org/*"}, []string{"*"}, []string{"*"}, envID)
+
+	h := NewAdminHandler(env.db, env.audit)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	body := `{"name":"updated","repository_patterns":["org/a","org/b"],"ref_patterns":["refs/heads/main","refs/tags/v*"],"actor_patterns":["deploy-*"],"environment_id":"` + envID + `"}`
+	req := jsonReq("PUT", "/admin/v1/policies/"+p.ID, body)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusNoContent, rr.Code)
+
+	got, _ := env.db.GetPolicy(p.ID)
+	assert.Equal(t, "updated", got.Name)
+	assert.Equal(t, []string{"org/a", "org/b"}, got.RepositoryPatterns)
+	assert.Equal(t, []string{"refs/heads/main", "refs/tags/v*"}, got.RefPatterns)
+	assert.Equal(t, []string{"deploy-*"}, got.ActorPatterns)
+}
+
+func TestAdminUpdatePolicyEmptyRepoPatterns(t *testing.T) {
+	env := setup(t)
+	envID := env.envID(t, "app", "prod")
+	p, _ := env.db.CreatePolicy("test", []string{"org/*"}, []string{"*"}, []string{"*"}, envID)
+
+	h := NewAdminHandler(env.db, env.audit)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	body := `{"name":"updated","repository_patterns":[],"environment_id":"` + envID + `"}`
+	req := jsonReq("PUT", "/admin/v1/policies/"+p.ID, body)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	assert.Contains(t, rr.Body.String(), "repository_patterns must not be empty")
+}
+
+func TestAdminUpdatePolicyInvalidGlob(t *testing.T) {
+	env := setup(t)
+	envID := env.envID(t, "app", "prod")
+	p, _ := env.db.CreatePolicy("test", []string{"org/*"}, []string{"*"}, []string{"*"}, envID)
+
+	h := NewAdminHandler(env.db, env.audit)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	body := `{"name":"updated","repository_patterns":["org/["],"environment_id":"` + envID + `"}`
+	req := jsonReq("PUT", "/admin/v1/policies/"+p.ID, body)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	assert.Contains(t, rr.Body.String(), "invalid glob pattern")
 }
 
 func TestAdminUpdateNonexistentSecret(t *testing.T) {
@@ -235,7 +327,7 @@ func TestAdminUpdateNonexistentPolicy(t *testing.T) {
 	h.Register(mux)
 
 	envID := env.envID(t, "app", "prod")
-	body := `{"name":"test","repository_pattern":"org/*","ref_pattern":"*","environment_id":"` + envID + `"}`
+	body := `{"name":"test","repository_patterns":["org/*"],"ref_patterns":["*"],"environment_id":"` + envID + `"}`
 	req := jsonReq("PUT", "/admin/v1/policies/nonexistent", body)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -383,7 +475,7 @@ func TestAdminCreatePolicyInvalidEnvironment(t *testing.T) {
 	mux := chi.NewRouter()
 	h.Register(mux)
 
-	body := `{"name":"test","repository_pattern":"org/*","environment_id":"nonexistent-id"}`
+	body := `{"name":"test","repository_patterns":["org/*"],"environment_id":"nonexistent-id"}`
 	req := jsonReq("POST", "/admin/v1/policies", body)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -393,12 +485,12 @@ func TestAdminCreatePolicyInvalidEnvironment(t *testing.T) {
 func TestAdminUpdatePolicyInvalidEnvironment(t *testing.T) {
 	env := setup(t)
 	envID := env.envID(t, "app", "prod")
-	p, _ := env.db.CreatePolicy("test", "org/*", "*", "*", envID)
+	p, _ := env.db.CreatePolicy("test", []string{"org/*"}, []string{"*"}, []string{"*"}, envID)
 	h := NewAdminHandler(env.db, env.audit)
 	mux := chi.NewRouter()
 	h.Register(mux)
 
-	body := `{"name":"test","repository_pattern":"org/*","ref_pattern":"*","environment_id":"nonexistent-id"}`
+	body := `{"name":"test","repository_patterns":["org/*"],"ref_patterns":["*"],"environment_id":"nonexistent-id"}`
 	req := jsonReq("PUT", "/admin/v1/policies/"+p.ID, body)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -517,7 +609,7 @@ func TestAdminCreatePolicyDBError(t *testing.T) {
 	h.Register(mux)
 
 	envID := "00000000-0000-0000-0000-000000000000"
-	body := `{"name":"test","repository_pattern":"org/*","environment_id":"` + envID + `"}`
+	body := `{"name":"test","repository_patterns":["org/*"],"environment_id":"` + envID + `"}`
 	req := jsonReq("POST", "/admin/v1/policies", body)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -545,7 +637,7 @@ func TestAdminUpdatePolicyDBError(t *testing.T) {
 	h.Register(mux)
 
 	envID := "00000000-0000-0000-0000-000000000000"
-	body := `{"name":"t","repository_pattern":"org/*","ref_pattern":"*","environment_id":"` + envID + `"}`
+	body := `{"name":"t","repository_patterns":["org/*"],"ref_patterns":["*"],"environment_id":"` + envID + `"}`
 	req := jsonReq("PUT", "/admin/v1/policies/someid", body)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
