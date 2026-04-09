@@ -1,0 +1,87 @@
+{{template "head" .}}
+{{define "title"}}{{.Node.Name}} - Secret Server{{end}}
+
+<nav class="breadcrumbs">
+    <a href="{{prefix}}/secrets">Secrets</a>
+    {{range .Breadcrumbs}}
+    / <a href="{{prefix}}/secrets/{{.ID}}">{{.Name}}</a>
+    {{end}}
+    / <strong>{{.Node.Name}}</strong>
+</nav>
+
+<div class="toolbar">
+    <h1>{{if eq .Node.Kind "group"}}Group{{else}}Secret{{end}}: <code>{{.Node.Name}}</code></h1>
+    <div class="toolbar-actions">
+        <a href="{{prefix}}/secrets/{{.Node.ID}}/edit" class="btn">Edit</a>
+        <form class="inline" method="post" action="{{prefix}}/secrets/{{.Node.ID}}/delete" onsubmit="return confirm('Delete this {{.Node.Kind}}? {{if eq .Node.Kind "group"}}This will delete all children and any policy attachments.{{end}}')">
+            {{with csrfToken}}<input type="hidden" name="csrf_token" value="{{.}}">{{end}}
+            <button type="submit" class="btn btn-danger">Delete</button>
+        </form>
+    </div>
+</div>
+
+{{if not .Node.HasEffectivePolicies}}
+<div class="error">This node has no effective policies (no policies attached here or on any ancestor). GitHub Actions will not see it until you attach a policy below.</div>
+{{end}}
+
+{{if eq .Node.Kind "group"}}
+<h2 class="section-heading">Children</h2>
+{{if .Node.Children}}
+{{template "nodeTree" .Node.Children}}
+{{else}}
+<p class="empty">This group is empty. <a href="{{prefix}}/secrets/new?kind=secret&parent={{.Node.ID}}">Create a secret</a> or <a href="{{prefix}}/secrets/new?kind=group&parent={{.Node.ID}}">create a sub-group</a>.</p>
+{{end}}
+{{end}}
+
+<h2 class="section-heading">Attached policies</h2>
+{{if .AttachedPolicies}}
+<table>
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Repository</th>
+            <th>Ref</th>
+            <th>Actor</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{range .AttachedPolicies}}
+        <tr>
+            <td>{{.Name}}</td>
+            <td>{{range $i, $p := .RepositoryPatterns}}{{if $i}}, {{end}}<code>{{$p}}</code>{{end}}</td>
+            <td>{{range $i, $p := .RefPatterns}}{{if $i}}, {{end}}<code>{{$p}}</code>{{end}}</td>
+            <td>{{range $i, $p := .ActorPatterns}}{{if $i}}, {{end}}<code>{{$p}}</code>{{end}}</td>
+            <td>
+                <form class="inline" method="post" action="{{prefix}}/secrets/{{$.Node.ID}}/policies/{{.ID}}/detach" onsubmit="return confirm('Detach this policy?')">
+                    {{with csrfToken}}<input type="hidden" name="csrf_token" value="{{.}}">{{end}}
+                    <button type="submit" class="btn btn-sm btn-danger">Detach</button>
+                </form>
+            </td>
+        </tr>
+        {{end}}
+    </tbody>
+</table>
+{{else}}
+<p class="empty">No policies attached to this node.</p>
+{{end}}
+
+{{if .AvailablePolicies}}
+<h2 class="section-heading">Attach a policy</h2>
+<form method="post" action="{{prefix}}/secrets/{{.Node.ID}}/policies/attach">
+    {{with csrfToken}}<input type="hidden" name="csrf_token" value="{{.}}">{{end}}
+    <div class="form-group">
+        <select name="policy_id" required>
+            <option value="">-- Select a policy --</option>
+            {{range .AvailablePolicies}}
+            <option value="{{.ID}}">{{.Name}}</option>
+            {{end}}
+        </select>
+    </div>
+    <div class="actions">
+        <button type="submit" class="btn btn-primary">Attach</button>
+    </div>
+</form>
+{{end}}
+
+{{template "foot" .}}

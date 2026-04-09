@@ -132,3 +132,29 @@ footer { text-align: center; padding: 1.5rem; font-size: 0.75rem; color: var(--m
 footer .github-link { color: var(--muted); margin-left: 0.35rem; vertical-align: middle; }
 footer .github-link:hover { color: var(--fg); }
 footer .github-link svg { width: 1em; height: 1em; vertical-align: middle; }
+
+/* Secret tree browser */
+.node-tree { list-style: none; padding-left: 0; margin: 0.5rem 0; }
+.node-tree .node-tree { padding-left: 1.5rem; border-left: 1px dashed var(--border); margin-left: 0.5rem; }
+.node-tree-item { padding: 0.2rem 0; }
+.node-row { display: flex; align-items: center; gap: 0.4rem; }
+.node-icon { color: var(--muted); font-family: monospace; font-size: 0.8rem; min-width: 1.6rem; }
+.node-kind-group > .node-row > a { font-weight: 600; }
+.node-kind-secret > .node-row > a { font-family: monospace; }
+.node-unreachable > .node-row > a { color: var(--muted); }
+.node-warning {
+    background: var(--danger);
+    color: #fff;
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+.stat-card.warn { border-color: var(--danger); }
+.stat-card.warn .value { color: var(--danger); }
+.breadcrumbs { font-size: 0.9rem; color: var(--muted); margin-bottom: 1rem; }
+.breadcrumbs a { color: var(--muted); }
+.breadcrumbs strong { color: var(--fg); }
+.inline-check { display: inline-flex; align-items: center; gap: 0.3rem; margin-left: 0.75rem; font-size: 0.85rem; color: var(--muted); font-weight: normal; }
+.inline-check input { width: auto; }

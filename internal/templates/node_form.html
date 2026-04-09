@@ -1,0 +1,73 @@
+{{template "head" .}}
+{{define "title"}}{{if .IsNew}}New {{if eq .Kind "group"}}Group{{else}}Secret{{end}}{{else}}Edit {{if eq .Kind "group"}}Group{{else}}Secret{{end}}{{end}} - Secret Server{{end}}
+
+<h1>{{if .IsNew}}New{{else}}Edit{{end}} {{if eq .Kind "group"}}Group{{else}}Secret{{end}}</h1>
+
+{{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+
+<form method="post" action="{{if .IsNew}}{{prefix}}/secrets{{else}}{{prefix}}/secrets/{{.NodeID}}{{end}}">
+    {{with csrfToken}}<input type="hidden" name="csrf_token" value="{{.}}">{{end}}
+    <input type="hidden" name="kind" value="{{.Kind}}">
+
+    <div class="form-group">
+        <label for="name">Name</label>
+        <input type="text" id="name" name="name" required
+            value="{{if .IsNew}}{{else}}{{.Name}}{{end}}"
+            placeholder="{{if eq .Kind "group"}}e.g. myapp-prod{{else}}e.g. DATABASE_URL{{end}}">
+        <div class="hint">{{if eq .Kind "group"}}Unique within its parent group.{{else}}<strong>Globally unique across the whole server.</strong> Consider prefixing with the app name (e.g. <code>myapp-DATABASE_URL</code>) to avoid conflicts.{{end}}</div>
+    </div>
+
+    {{if eq .Kind "secret"}}
+    <div class="form-group">
+        <label for="value">Value</label>
+        <div class="input-wrap">
+            <input type="password" id="value" name="value" {{if .IsNew}}required{{end}}
+                placeholder="{{if .IsNew}}Secret value{{else}}Leave blank to keep current value{{end}}">
+            <button type="button" class="btn btn-sm" onclick="toggleValue()">Show</button>
+        </div>
+        <div class="hint">The sensitive value to encrypt and store.</div>
+        {{if .JSONStructure}}
+        <details class="json-details">
+            <summary>Base64-encoded JSON detected — view structure</summary>
+            <pre>{{.JSONStructure}}</pre>
+        </details>
+        {{end}}
+    </div>
+    {{end}}
+
+    <div class="form-group">
+        <label for="parent_id">Parent group</label>
+        <select id="parent_id" name="parent_id">
+            <option value="">(root — no parent)</option>
+            {{$cur := .ParentID}}
+            {{range .Groups}}
+            <option value="{{.ID}}" {{if eq .ID $cur}}selected{{end}}>{{.Name}}</option>
+            {{end}}
+        </select>
+        {{if not .IsNew}}<label class="inline-check"><input type="checkbox" name="move" value="1"> Apply parent change</label>{{end}}
+        <div class="hint">{{if .IsNew}}Leave empty to create at the root.{{else}}Tick the box to actually move the node to the selected parent.{{end}}</div>
+    </div>
+
+    <div class="actions">
+        <button type="submit" class="btn btn-primary">{{if .IsNew}}Create{{else}}Update{{end}}</button>
+        <a href="{{prefix}}/secrets" class="btn">Cancel</a>
+    </div>
+</form>
+
+{{if eq .Kind "secret"}}
+<script>
+function toggleValue() {
+    var el = document.getElementById('value');
+    var btn = el.parentElement.querySelector('button');
+    if (el.type === 'password') {
+        el.type = 'text';
+        btn.textContent = 'Hide';
+    } else {
+        el.type = 'password';
+        btn.textContent = 'Show';
+    }
+}
+</script>
+{{end}}
+
+{{template "foot" .}}
