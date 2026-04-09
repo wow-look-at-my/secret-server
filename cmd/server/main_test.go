@@ -110,7 +110,7 @@ func TestAdminRequiresCFAccess(t *testing.T) {
 	require.Nil(t, err)
 
 	// Admin endpoint without CF Access token should be unauthorized
-	req := httptest.NewRequest("POST", handlers.AdminPrefix+"/v1/secrets", nil)
+	req := httptest.NewRequest("POST", handlers.AdminPrefix+"/v1/nodes", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 

@@ -395,9 +395,10 @@ func mergeSortedPolicies(a, b []sqlcdb.AccessPolicy) []sqlcdb.AccessPolicy {
 }
 
 // AddPrecedence records that policyID must be evaluated AFTER dependsOnID
-// for the given node. Runs a cycle check against the existing edges (DFS
-// from dependsOnID — if policyID is reachable, inserting this edge would
-// close a cycle) before touching the table.
+// for the given node. "A depends on B" is modelled as an edge B -> A in the
+// evaluation graph. Inserting a new edge from dependsOnID to policyID would
+// close a cycle iff, in the existing graph, policyID can already reach
+// dependsOnID — so that's the DFS we run before touching the table.
 func (d *DB) AddPrecedence(nodeID, policyID, dependsOnID string) error {
 	if policyID == dependsOnID {
 		return errors.New("a policy cannot depend on itself")
@@ -407,7 +408,7 @@ func (d *DB) AddPrecedence(nodeID, policyID, dependsOnID string) error {
 	if err != nil {
 		return fmt.Errorf("list precedence: %w", err)
 	}
-	if reachable(edges, dependsOnID, policyID) {
+	if reachable(edges, policyID, dependsOnID) {
 		return errors.New("adding this edge would create a precedence cycle")
 	}
 	return d.q.AddPolicyPrecedence(ctx, sqlcdb.AddPolicyPrecedenceParams{

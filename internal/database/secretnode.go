@@ -139,7 +139,7 @@ func (d *DB) CreateSecret(parentID *string, name, plaintext string) (*Secret, er
 	if err != nil {
 		return nil, fmt.Errorf("insert secret: %w", err)
 	}
-	return &Secret{id: id, name: name, parentID: parentID, CreatedAt: now, UpdatedAt: now}, nil
+	return &Secret{id: id, name: name, parentID: parentID, Value: plaintext, CreatedAt: now, UpdatedAt: now}, nil
 }
 
 // GetSecret fetches a single secret leaf by ID and decrypts its value.
