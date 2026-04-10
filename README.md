@@ -53,7 +53,7 @@ export CF_ACCESS_ADMIN_AUDIENCE="your-cf-audience"
 
 ## GitHub Action
 
-Use the composite action to fetch secrets in GitHub Actions workflows:
+The composite action that fetches secrets from this server lives in [`wow-look-at-my/actions`](https://github.com/wow-look-at-my/actions/tree/master/secret-server):
 
 ```yaml
 permissions:
@@ -63,17 +63,14 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: wow-look-at-my/secret-server@main
+      - uses: wow-look-at-my/actions@secret-server#latest
         id: secrets
-        with:
-          url: https://secrets.example.com
-          audience: https://secrets.example.com  # optional, defaults to url
 
       # Secrets are exported as environment variables
       - run: echo "Got $DB_URL"
 ```
 
-The action requests a GitHub OIDC token, sends it to the server's public API, and exports returned secrets as environment variables.
+It requests a GitHub OIDC token, sends it to this server's `/github/v1/secrets` endpoint, and exports returned secrets as masked environment variables. See the [action README](https://github.com/wow-look-at-my/actions/blob/master/secret-server/README.md) for full input/output documentation.
 
 ## Audit Log
 
