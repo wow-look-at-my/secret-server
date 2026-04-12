@@ -32,10 +32,12 @@ type AuditEntry struct {
 }
 
 func NewAuditDB(dbPath string) (*AuditDB, error) {
-	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(wal)&_pragma=foreign_keys(on)")
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=foreign_keys(on)")
 	if err != nil {
 		return nil, fmt.Errorf("open audit database: %w", err)
 	}
+	// SQLite requires a single connection to avoid "database is locked" errors.
+	db.SetMaxOpenConns(1)
 	if err := db.Ping(); err != nil {
 		return nil, fmt.Errorf("ping audit database: %w", err)
 	}
