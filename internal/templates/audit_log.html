@@ -13,6 +13,7 @@
             <th>Actor</th>
             <th>Resource</th>
             <th>Details</th>
+            <th></th>
         </tr>
     </thead>
     <tbody>
@@ -42,6 +43,7 @@
                     <code class="audit-details">{{.Details}}</code>
                 {{end}}
             </td>
+            <td><button class="btn-copy" onclick="copyRow(this)" title="Copy row">Copy</button></td>
         </tr>
         {{end}}
     </tbody>
@@ -54,5 +56,26 @@
 {{else}}
 <p class="empty">No audit log entries yet.</p>
 {{end}}
+
+<script>
+function copyRow(btn) {
+    var row = btn.closest("tr");
+    var cells = row.querySelectorAll("td");
+    var headers = ["Time", "Action", "Actor", "Resource", "Details"];
+    var parts = [];
+    for (var i = 0; i < headers.length && i < cells.length; i++) {
+        var text = cells[i].textContent.replace(/\s+/g, " ").trim();
+        if (text) parts.push(headers[i] + ": " + text);
+    }
+    navigator.clipboard.writeText(parts.join(" | ")).then(function() {
+        btn.textContent = "Copied";
+        btn.classList.add("copied");
+        setTimeout(function() {
+            btn.textContent = "Copy";
+            btn.classList.remove("copied");
+        }, 1500);
+    });
+}
+</script>
 
 {{template "foot" .}}
