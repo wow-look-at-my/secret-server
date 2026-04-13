@@ -17,7 +17,7 @@ services:
         COPY --from=builder /secret-server /secret-server
         ENTRYPOINT ["/secret-server"]
     volumes:
-      - data:/data
+      - /mnt/ssdpool/appdata/secret-server/data:/data
     environment:
       - LISTEN_ADDR=:8080
       - DATABASE_PATH=/data/secrets.db
@@ -29,9 +29,6 @@ services:
       - LOG_LEVEL=info
     networks:
       - nas-public-network
-
-volumes:
-  data:
 
 networks:
   nas-public-network:
