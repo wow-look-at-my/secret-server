@@ -47,7 +47,7 @@ nav a {
 }
 nav a:hover { color: var(--accent); }
 nav .brand { font-weight: 700; margin-right: auto; }
-main { max-width: 960px; margin: 2rem auto; padding: 0 1.5rem; }
+main { margin: 2rem 0; padding: 0 1.5rem; }
 h1 { margin-bottom: 1rem; font-size: 1.5rem; }
 table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
 th, td {
@@ -126,6 +126,9 @@ form.inline { display: inline; }
 .detail-list dt { font-weight: 600; white-space: nowrap; min-width: 5rem; color: var(--muted); }
 .detail-list dd { word-break: break-word; }
 .pagination { margin-top: 1rem; display: flex; gap: 1rem; }
+.btn-copy { background: none; border: 1px solid var(--border); border-radius: 4px; padding: 0.15rem 0.4rem; cursor: pointer; color: var(--muted); font-size: 0.75rem; }
+.btn-copy:hover { background: var(--bg-alt); color: var(--fg); }
+.btn-copy.copied { color: var(--success); border-color: var(--success); }
 .toolbar-actions { display: flex; gap: 0.5rem; align-items: center; }
 h2.section-heading { margin-bottom: 0.5rem; }
 footer { text-align: center; padding: 1.5rem; font-size: 0.75rem; color: var(--muted); }
