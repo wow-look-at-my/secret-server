@@ -727,3 +727,4 @@ func TestMatchingPoliciesInvalidGlobSkips(t *testing.T) {
 	require.Equal(t, 1, len(matched))
 	assert.Equal(t, "good", matched[0].Name)
 }
+

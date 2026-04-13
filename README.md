@@ -91,7 +91,11 @@ On upgrade from older versions, the schema is automatically migrated: existing p
 
 ## Access Policies
 
-Policies control which GitHub Actions workflows can access which secrets. Each policy specifies:
+Policies control which GitHub Actions workflows can access which secrets. Each policy has a **mode** that determines how authorization is performed:
+
+### Pattern mode (default)
+
+The traditional mode where the server checks repo/ref/actor patterns:
 
 - **Repository patterns** — one or more glob patterns matching repository names (e.g. `myorg/*`, `myorg/api-*`). At least one is required. A request matches if the repository matches **any** of the listed globs.
 - **Ref patterns** — glob patterns matching git refs (e.g. `refs/heads/main`, `refs/tags/v*`). Leave empty or use `*` to allow any branch or tag.
@@ -100,14 +104,34 @@ Policies control which GitHub Actions workflows can access which secrets. Each p
 
 A policy matches a request iff the repository matches **any** repository pattern AND the ref matches **any** ref pattern AND the actor matches **any** actor pattern.
 
-In the web UI, enter one pattern per line in each textarea. In the JSON admin API, each field is a string array: `repository_patterns`, `ref_patterns`, `actor_patterns`.
+### GitHub Actions Environment mode
+
+An alternative mode that trusts GitHub's [environment deployment protection rules](https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment) instead of doing its own ref/actor filtering:
+
+- **Repository patterns** — same as pattern mode, checked against the OIDC token's `repository` claim.
+- **GitHub environment name** — the exact name of the GitHub Actions environment (e.g. `production`). Must match the `environment` claim in the OIDC token.
+- Ref and actor patterns are **ignored** — GitHub enforces branch restrictions, required reviewers, and wait timers for the environment.
+
+This mode is useful when you want to leverage GitHub's native environment protection rules (branch policies, required reviewers, wait timers) rather than duplicating them in the secret server.
+
+**Security tradeoff:** Repo admins can modify environment protection rules, so this mode delegates trust to GitHub and repo admins. Use pattern mode when centralized control is required.
+
+### Common fields
+
+In the web UI, enter one pattern per line in each textarea. In the JSON admin API:
+
+- `mode` — `"pattern"` (default) or `"github-environment"`
+- `repository_patterns` — string array of glob patterns
+- `ref_patterns`, `actor_patterns` — string arrays (pattern mode only)
+- `github_environment` — string (required for github-environment mode)
+- `environment_id` — UUID of the managed environment whose secrets this policy grants access to
 
 When a GitHub Actions workflow requests secrets, the server:
 1. Validates the OIDC token
-2. Finds policies matching the token's repository, ref, and actor claims
+2. Finds policies matching the token's claims (mode-dependent matching)
 3. Returns secrets from matching project/environment pairs
 
-On upgrade from older versions, existing single-pattern columns are automatically migrated to the new JSON-array columns in-place; existing values become single-element arrays with no change in behavior.
+On upgrade from older versions, existing policies default to pattern mode. The `mode` and `github_environment` columns are automatically added.
 
 ## Cloudflare Access Setup
 

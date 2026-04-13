@@ -117,6 +117,14 @@ func makeOIDCToken(t *testing.T, jwk jose.JSONWebKey, repo, ref string) string {
 }
 
 func makeOIDCTokenWithActor(t *testing.T, jwk jose.JSONWebKey, repo, ref, actor string) string {
+	return makeOIDCTokenFull(t, jwk, repo, ref, actor, "")
+}
+
+func makeOIDCTokenWithEnv(t *testing.T, jwk jose.JSONWebKey, repo, ref, environment string) string {
+	return makeOIDCTokenFull(t, jwk, repo, ref, "deploy-bot", environment)
+}
+
+func makeOIDCTokenFull(t *testing.T, jwk jose.JSONWebKey, repo, ref, actor, environment string) string {
 	t.Helper()
 	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: jwk}, (&jose.SignerOptions{}).WithType("JWT"))
 	require.Nil(t, err)
@@ -134,11 +142,13 @@ func makeOIDCTokenWithActor(t *testing.T, jwk jose.JSONWebKey, repo, ref, actor 
 		RepositoryOwner string `json:"repository_owner"`
 		Actor           string `json:"actor"`
 		Ref             string `json:"ref"`
+		Environment     string `json:"environment,omitempty"`
 	}{
 		Repository:      repo,
 		RepositoryOwner: strings.Split(repo, "/")[0],
 		Actor:           actor,
 		Ref:             ref,
+		Environment:     environment,
 	}
 	token, err := jwt.Signed(signer).Claims(stdClaims).Claims(customClaims).Serialize()
 	require.Nil(t, err)

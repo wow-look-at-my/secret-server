@@ -242,3 +242,71 @@ func TestPublicFetchSecretsActorPatternNoMatch(t *testing.T) {
 	require.Equal(t, http.StatusOK, rr.Code)
 	assert.Equal(t, "{}", strings.TrimSpace(rr.Body.String()))
 }
+
+func TestPublicFetchSecretsGitHubEnvMode(t *testing.T) {
+	env := setup(t)
+
+	envID := env.envID(t, "myapp", "prod")
+	env.db.CreateSecret("API_KEY", "sk-live-123", envID)
+	env.db.CreatePolicy("ghenv", "github-environment", []string{"myorg/*"}, nil, nil, "production", envID)
+
+	h := NewPublicHandler(env.db, env.audit, env.oidc)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	// Token with matching environment claim
+	token := makeOIDCTokenWithEnv(t, env.jwk, "myorg/repo", "refs/heads/feature", "production")
+	req := httptest.NewRequest("GET", "/github/v1/secrets", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	var result map[string]string
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &result))
+	assert.Equal(t, "sk-live-123", result["API_KEY"])
+}
+
+func TestPublicFetchSecretsGitHubEnvModeNoMatch(t *testing.T) {
+	env := setup(t)
+
+	envID := env.envID(t, "myapp", "prod")
+	env.db.CreateSecret("API_KEY", "sk-live-123", envID)
+	env.db.CreatePolicy("ghenv", "github-environment", []string{"myorg/*"}, nil, nil, "production", envID)
+
+	h := NewPublicHandler(env.db, env.audit, env.oidc)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	// Token with wrong environment claim
+	token := makeOIDCTokenWithEnv(t, env.jwk, "myorg/repo", "refs/heads/main", "staging")
+	req := httptest.NewRequest("GET", "/github/v1/secrets", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	assert.Equal(t, "{}", strings.TrimSpace(rr.Body.String()))
+}
+
+func TestPublicFetchSecretsGitHubEnvModeNoEnvClaim(t *testing.T) {
+	env := setup(t)
+
+	envID := env.envID(t, "myapp", "prod")
+	env.db.CreateSecret("API_KEY", "sk-live-123", envID)
+	env.db.CreatePolicy("ghenv", "github-environment", []string{"myorg/*"}, nil, nil, "production", envID)
+
+	h := NewPublicHandler(env.db, env.audit, env.oidc)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	// Token without environment claim (standard makeOIDCToken)
+	token := makeOIDCToken(t, env.jwk, "myorg/repo", "refs/heads/main")
+	req := httptest.NewRequest("GET", "/github/v1/secrets", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	assert.Equal(t, "{}", strings.TrimSpace(rr.Body.String()))
+}

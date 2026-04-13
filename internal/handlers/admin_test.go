@@ -682,3 +682,52 @@ func TestAdminRequiresJSONContentType(t *testing.T) {
 		assert.Equal(t, http.StatusUnsupportedMediaType, rr.Code, "%s %s", ep.method, ep.path)
 	}
 }
+
+func TestAdminCreatePolicyGitHubEnvMode(t *testing.T) {
+	env := setup(t)
+	h := NewAdminHandler(env.db, env.audit)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	envID := env.envID(t, "app", "prod")
+	body := `{"name":"ghenv","mode":"github-environment","repository_patterns":["org/*"],"github_environment":"production","environment_id":"` + envID + `"}`
+	req := jsonReq("POST", "/admin/v1/policies", body)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusCreated, rr.Code)
+
+	policies, _ := env.db.ListPolicies()
+	require.Equal(t, 1, len(policies))
+	assert.Equal(t, "github-environment", policies[0].Mode)
+	assert.Equal(t, "production", policies[0].GitHubEnvironment)
+}
+
+func TestAdminCreatePolicyGitHubEnvModeMissingEnv(t *testing.T) {
+	env := setup(t)
+	h := NewAdminHandler(env.db, env.audit)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	envID := env.envID(t, "app", "prod")
+	body := `{"name":"ghenv","mode":"github-environment","repository_patterns":["org/*"],"environment_id":"` + envID + `"}`
+	req := jsonReq("POST", "/admin/v1/policies", body)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	assert.Contains(t, rr.Body.String(), "github_environment is required")
+}
+
+func TestAdminCreatePolicyInvalidMode(t *testing.T) {
+	env := setup(t)
+	h := NewAdminHandler(env.db, env.audit)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	envID := env.envID(t, "app", "prod")
+	body := `{"name":"bad","mode":"invalid","repository_patterns":["org/*"],"environment_id":"` + envID + `"}`
+	req := jsonReq("POST", "/admin/v1/policies", body)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	assert.Contains(t, rr.Body.String(), "invalid mode")
+}
