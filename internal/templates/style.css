@@ -110,6 +110,7 @@ form.inline { display: inline; }
 .error { background: var(--danger); color: #fff; padding: 0.75rem 1rem; border-radius: 4px; margin-bottom: 1rem; }
 .empty { color: var(--muted); text-align: center; padding: 2rem; }
 .hint { font-size: 0.8rem; color: var(--muted); margin-top: 0.2rem; }
+.muted { color: var(--muted); }
 .page-desc { color: var(--muted); margin-bottom: 1rem; margin-top: -0.5rem; }
 .input-wrap { position: relative; }
 .input-wrap .btn { position: absolute; right: 4px; top: 4px; }

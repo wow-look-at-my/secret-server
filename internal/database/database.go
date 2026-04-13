@@ -83,9 +83,11 @@ func (d *DB) migrate() error {
 			CREATE TABLE IF NOT EXISTS access_policies (
 				id TEXT PRIMARY KEY,
 				name TEXT NOT NULL,
+				mode TEXT NOT NULL DEFAULT 'pattern',
 				repository_patterns TEXT NOT NULL DEFAULT '[]',
 				ref_patterns TEXT NOT NULL DEFAULT '["*"]',
 				actor_patterns TEXT NOT NULL DEFAULT '["*"]',
+				github_environment TEXT NOT NULL DEFAULT '',
 				environment_id TEXT NOT NULL REFERENCES environments(id),
 				created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 			);
@@ -108,7 +110,40 @@ func (d *DB) migrate() error {
 		return fmt.Errorf("migrate policy pattern lists: %w", err)
 	}
 
+	// Add mode and github_environment columns for GitHub Actions Environment support.
+	if err := d.migratePolicyMode(); err != nil {
+		return fmt.Errorf("migrate policy mode: %w", err)
+	}
+
 	return nil
+}
+
+// migratePolicyMode adds the mode and github_environment columns to
+// access_policies for existing databases. Idempotent.
+func (d *DB) migratePolicyMode() error {
+	if has, err := d.hasPolicyColumn("mode"); err != nil {
+		return err
+	} else if has {
+		return nil
+	}
+
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmts := []string{
+		`ALTER TABLE access_policies ADD COLUMN mode TEXT NOT NULL DEFAULT 'pattern'`,
+		`ALTER TABLE access_policies ADD COLUMN github_environment TEXT NOT NULL DEFAULT ''`,
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("exec %q: %w", stmt, err)
+		}
+	}
+
+	return tx.Commit()
 }
 
 // hasPolicyColumn reports whether the access_policies table has a column

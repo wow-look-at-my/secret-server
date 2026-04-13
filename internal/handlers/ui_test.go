@@ -15,7 +15,7 @@ func TestUIPages(t *testing.T) {
 	env := setup(t)
 	envID := env.envID(t, "app", "prod")
 	env.db.CreateSecret("KEY", "val", envID)
-	env.db.CreatePolicy("p", []string{"org/*"}, []string{"*"}, []string{"*"}, envID)
+	env.db.CreatePolicy("p", "", []string{"org/*"}, []string{"*"}, []string{"*"}, "", envID)
 
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := chi.NewRouter()
@@ -307,7 +307,7 @@ func TestUIPolicyCreateMissingRepoPatterns(t *testing.T) {
 func TestUIPolicyUpdateMultiPattern(t *testing.T) {
 	env := setup(t)
 	envProd := env.envID(t, "app", "prod")
-	p, _ := env.db.CreatePolicy("test", []string{"org/*"}, []string{"*"}, []string{"*"}, envProd)
+	p, _ := env.db.CreatePolicy("test", "", []string{"org/*"}, []string{"*"}, []string{"*"}, "", envProd)
 
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := chi.NewRouter()
@@ -329,7 +329,7 @@ func TestUIPolicyUpdateMultiPattern(t *testing.T) {
 func TestUIPolicyUpdateInvalidGlob(t *testing.T) {
 	env := setup(t)
 	envProd := env.envID(t, "app", "prod")
-	p, _ := env.db.CreatePolicy("test", []string{"org/*"}, []string{"*"}, []string{"*"}, envProd)
+	p, _ := env.db.CreatePolicy("test", "", []string{"org/*"}, []string{"*"}, []string{"*"}, "", envProd)
 
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := chi.NewRouter()
@@ -399,7 +399,7 @@ func TestUIListSecretsWithEnvFilter(t *testing.T) {
 func TestUIUpdatePolicyViaForm(t *testing.T) {
 	env := setup(t)
 	envProd := env.envID(t, "app", "prod")
-	p, _ := env.db.CreatePolicy("test", []string{"org/*"}, []string{"*"}, []string{"*"}, envProd)
+	p, _ := env.db.CreatePolicy("test", "", []string{"org/*"}, []string{"*"}, []string{"*"}, "", envProd)
 
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := chi.NewRouter()
@@ -421,7 +421,7 @@ func TestUIUpdatePolicyViaForm(t *testing.T) {
 func TestUIUpdatePolicyDefaultRefPattern(t *testing.T) {
 	env := setup(t)
 	envProd := env.envID(t, "app", "prod")
-	p, _ := env.db.CreatePolicy("test", []string{"org/*"}, []string{"refs/heads/main"}, []string{"*"}, envProd)
+	p, _ := env.db.CreatePolicy("test", "", []string{"org/*"}, []string{"refs/heads/main"}, []string{"*"}, "", envProd)
 
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := chi.NewRouter()
@@ -459,7 +459,7 @@ func TestUIDeleteSecretViaForm(t *testing.T) {
 func TestUIDeletePolicyViaForm(t *testing.T) {
 	env := setup(t)
 	envProd := env.envID(t, "app", "prod")
-	p, _ := env.db.CreatePolicy("del", []string{"org/*"}, []string{"*"}, []string{"*"}, envProd)
+	p, _ := env.db.CreatePolicy("del", "", []string{"org/*"}, []string{"*"}, []string{"*"}, "", envProd)
 
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := chi.NewRouter()

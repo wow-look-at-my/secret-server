@@ -11,9 +11,11 @@ import (
 type AccessPolicy struct {
 	ID                 string
 	Name               string
+	Mode               string
 	RepositoryPatterns string
 	RefPatterns        string
 	ActorPatterns      string
+	GithubEnvironment  string
 	EnvironmentID      string
 	CreatedAt          time.Time
 }

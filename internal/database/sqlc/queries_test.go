@@ -222,9 +222,9 @@ func TestPolicyQueries(t *testing.T) {
 	createEnv(t, q, "env-1", "proj", "prod")
 
 	err := q.CreatePolicy(ctx, sqlcdb.CreatePolicyParams{
-		ID: "p1", Name: "Allow prod", RepositoryPatterns: `["org/*"]`,
+		ID: "p1", Name: "Allow prod", Mode: "pattern", RepositoryPatterns: `["org/*"]`,
 		RefPatterns: `["refs/heads/main"]`, ActorPatterns: `["*"]`,
-		EnvironmentID: "env-1", CreatedAt: now,
+		GithubEnvironment: "", EnvironmentID: "env-1", CreatedAt: now,
 	})
 	require.Nil(t, err)
 
@@ -245,8 +245,8 @@ func TestPolicyQueries(t *testing.T) {
 	assert.Equal(t, int64(1), count)
 
 	result, err := q.UpdatePolicy(ctx, sqlcdb.UpdatePolicyParams{
-		Name: "Updated", RepositoryPatterns: `["other/*"]`, RefPatterns: `["*"]`,
-		ActorPatterns: `["*"]`, EnvironmentID: "env-1", ID: "p1",
+		Name: "Updated", Mode: "pattern", RepositoryPatterns: `["other/*"]`, RefPatterns: `["*"]`,
+		ActorPatterns: `["*"]`, GithubEnvironment: "", EnvironmentID: "env-1", ID: "p1",
 	})
 	require.Nil(t, err)
 	n, _ := result.RowsAffected()

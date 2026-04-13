@@ -12,9 +12,11 @@
     <thead>
         <tr>
             <th>Name</th>
+            <th>Mode</th>
             <th>Repository Patterns</th>
             <th>Ref Patterns</th>
             <th>Actor Patterns</th>
+            <th>GitHub Env</th>
             <th>Project</th>
             <th>Environment</th>
             <th>Actions</th>
@@ -24,9 +26,11 @@
         {{range .}}
         <tr>
             <td>{{.Name}}</td>
+            <td>{{if eq .Mode "github-environment"}}GitHub Env{{else}}Pattern{{end}}</td>
             <td>{{range $i, $p := .RepositoryPatterns}}{{if $i}}, {{end}}<code>{{$p}}</code>{{end}}</td>
-            <td>{{range $i, $p := .RefPatterns}}{{if $i}}, {{end}}<code>{{$p}}</code>{{end}}</td>
-            <td>{{range $i, $p := .ActorPatterns}}{{if $i}}, {{end}}<code>{{$p}}</code>{{end}}</td>
+            <td>{{if eq .Mode "github-environment"}}<span class="muted">n/a</span>{{else}}{{range $i, $p := .RefPatterns}}{{if $i}}, {{end}}<code>{{$p}}</code>{{end}}{{end}}</td>
+            <td>{{if eq .Mode "github-environment"}}<span class="muted">n/a</span>{{else}}{{range $i, $p := .ActorPatterns}}{{if $i}}, {{end}}<code>{{$p}}</code>{{end}}{{end}}</td>
+            <td>{{if .GitHubEnvironment}}<code>{{.GitHubEnvironment}}</code>{{else}}<span class="muted">-</span>{{end}}</td>
             <td>{{.Project}}</td>
             <td>{{.Environment}}</td>
             <td>

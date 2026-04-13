@@ -365,6 +365,23 @@ func (h *UIHandler) editPolicy(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// parsePolicyModeForm extracts and validates the mode and github_environment
+// fields from a policy form submission.
+func parsePolicyModeForm(r *http.Request) (mode, githubEnv string, err error) {
+	mode = r.FormValue("mode")
+	if mode == "" {
+		mode = database.PolicyModePattern
+	}
+	if mode != database.PolicyModePattern && mode != database.PolicyModeGitHubEnvironment {
+		return "", "", fmt.Errorf("invalid mode")
+	}
+	githubEnv = r.FormValue("github_environment")
+	if mode == database.PolicyModeGitHubEnvironment && githubEnv == "" {
+		return "", "", fmt.Errorf("GitHub environment name is required for github-environment mode")
+	}
+	return mode, githubEnv, nil
+}
+
 // parsePolicyPatternsForm extracts and validates the three pattern lists
 // from an access-policy form submission. An empty ref/actor list defaults
 // to ["*"] so empty-field semantics match the legacy behavior.
@@ -395,6 +412,17 @@ func (h *UIHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
+	mode, githubEnvironment, err := parsePolicyModeForm(r)
+	if err != nil {
+		envs, _ := h.db.ListEnvironments()
+		h.tmpl.Render(w, r, "policy_form.html", map[string]any{
+			"IsNew":        true,
+			"Error":        err.Error(),
+			"Form":         r.Form,
+			"Environments": envs,
+		})
+		return
+	}
 	repoPatterns, refPatterns, actorPatterns, err := parsePolicyPatternsForm(r)
 	if err != nil {
 		envs, _ := h.db.ListEnvironments()
@@ -417,13 +445,7 @@ func (h *UIHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	policy, err := h.db.CreatePolicy(
-		r.FormValue("name"),
-		repoPatterns,
-		refPatterns,
-		actorPatterns,
-		envID,
-	)
+	policy, err := h.db.CreatePolicy(r.FormValue("name"), mode, repoPatterns, refPatterns, actorPatterns, githubEnvironment, envID)
 	if err != nil {
 		slog.Error("create policy failed", "error", err)
 		envs, _ := h.db.ListEnvironments()
@@ -443,9 +465,11 @@ func (h *UIHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	details, _ := json.Marshal(map[string]any{
 		"name":                r.FormValue("name"),
+		"mode":                mode,
 		"repository_patterns": repoPatterns,
 		"ref_patterns":        refPatterns,
 		"actor_patterns":      actorPatterns,
+		"github_environment":  githubEnvironment,
 		"project":             project,
 		"environment":         environment,
 	})
@@ -463,6 +487,7 @@ func (h *UIHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
+	mode, githubEnvironment, _ := parsePolicyModeForm(r)
 	repoPatterns, refPatterns, actorPatterns, err := parsePolicyPatternsForm(r)
 	if err != nil {
 		existing, _ := h.db.GetPolicy(id)
@@ -482,8 +507,7 @@ func (h *UIHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	err = h.db.UpdatePolicy(id, r.FormValue("name"), repoPatterns, refPatterns, actorPatterns, envID)
-	if err != nil {
+	if err = h.db.UpdatePolicy(id, r.FormValue("name"), mode, repoPatterns, refPatterns, actorPatterns, githubEnvironment, envID); err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			http.NotFound(w, r)
 			return
@@ -500,9 +524,11 @@ func (h *UIHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	details, _ := json.Marshal(map[string]any{
 		"name":                r.FormValue("name"),
+		"mode":                mode,
 		"repository_patterns": repoPatterns,
 		"ref_patterns":        refPatterns,
 		"actor_patterns":      actorPatterns,
+		"github_environment":  githubEnvironment,
 		"project":             project,
 		"environment":         environment,
 	})

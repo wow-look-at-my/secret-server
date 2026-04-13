@@ -201,14 +201,25 @@ func (h *AdminHandler) deleteSecret(w http.ResponseWriter, r *http.Request) {
 // default to ["*"] (match anything) when omitted.
 type policyRequest struct {
 	Name               string   `json:"name"`
+	Mode               string   `json:"mode"`
 	RepositoryPatterns []string `json:"repository_patterns"`
 	RefPatterns        []string `json:"ref_patterns"`
 	ActorPatterns      []string `json:"actor_patterns"`
+	GitHubEnvironment  string   `json:"github_environment"`
 	EnvironmentID      string   `json:"environment_id"`
 }
 
-// normalize applies defaults and validates the pattern lists.
+// normalize applies defaults and validates the pattern lists and mode.
 func (req *policyRequest) normalize() error {
+	if req.Mode == "" {
+		req.Mode = database.PolicyModePattern
+	}
+	if req.Mode != database.PolicyModePattern && req.Mode != database.PolicyModeGitHubEnvironment {
+		return fmt.Errorf("invalid mode %q: must be %q or %q", req.Mode, database.PolicyModePattern, database.PolicyModeGitHubEnvironment)
+	}
+	if req.Mode == database.PolicyModeGitHubEnvironment && req.GitHubEnvironment == "" {
+		return fmt.Errorf("github_environment is required when mode is %q", database.PolicyModeGitHubEnvironment)
+	}
 	if len(req.RefPatterns) == 0 {
 		req.RefPatterns = []string{"*"}
 	}
@@ -259,7 +270,7 @@ func (h *AdminHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	policy, err := h.db.CreatePolicy(req.Name, req.RepositoryPatterns, req.RefPatterns, req.ActorPatterns, req.EnvironmentID)
+	policy, err := h.db.CreatePolicy(req.Name, req.Mode, req.RepositoryPatterns, req.RefPatterns, req.ActorPatterns, req.GitHubEnvironment, req.EnvironmentID)
 	if err != nil {
 		http.Error(w, `{"error":"failed to create policy"}`, http.StatusInternalServerError)
 		return
@@ -267,9 +278,11 @@ func (h *AdminHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
 
 	details, _ := json.Marshal(map[string]any{
 		"name":                req.Name,
+		"mode":                req.Mode,
 		"repository_patterns": req.RepositoryPatterns,
 		"ref_patterns":        req.RefPatterns,
 		"actor_patterns":      req.ActorPatterns,
+		"github_environment":  req.GitHubEnvironment,
 		"project":             env.Project,
 		"environment":         env.Environment,
 	})
@@ -318,7 +331,7 @@ func (h *AdminHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.db.UpdatePolicy(id, req.Name, req.RepositoryPatterns, req.RefPatterns, req.ActorPatterns, req.EnvironmentID); err != nil {
+	if err := h.db.UpdatePolicy(id, req.Name, req.Mode, req.RepositoryPatterns, req.RefPatterns, req.ActorPatterns, req.GitHubEnvironment, req.EnvironmentID); err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			http.Error(w, `{"error":"policy not found"}`, http.StatusNotFound)
 			return
@@ -329,9 +342,11 @@ func (h *AdminHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 
 	details, _ := json.Marshal(map[string]any{
 		"name":                req.Name,
+		"mode":                req.Mode,
 		"repository_patterns": req.RepositoryPatterns,
 		"ref_patterns":        req.RefPatterns,
 		"actor_patterns":      req.ActorPatterns,
+		"github_environment":  req.GitHubEnvironment,
 		"project":             env.Project,
 		"environment":         env.Environment,
 	})

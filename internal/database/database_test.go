@@ -140,7 +140,7 @@ func TestEnvironmentInUse(t *testing.T) {
 	db.DeleteSecret(s.ID)
 
 	// Create a policy referencing it
-	_, err = db.CreatePolicy("p1", []string{"*"}, []string{"*"}, []string{"*"}, env.ID)
+	_, err = db.CreatePolicy("p1", "", []string{"*"}, []string{"*"}, []string{"*"}, "", env.ID)
 	require.Nil(t, err)
 
 	inUse, err = db.EnvironmentInUse(env.ID)
@@ -156,7 +156,7 @@ func TestSecretFKConstraint(t *testing.T) {
 	require.NotNil(t, err)
 
 	// Creating a policy with a non-existent environment_id should fail (FK)
-	_, err = db.CreatePolicy("p1", []string{"*"}, []string{"*"}, []string{"*"}, "nonexistent-env-id")
+	_, err = db.CreatePolicy("p1", "", []string{"*"}, []string{"*"}, []string{"*"}, "", "nonexistent-env-id")
 	require.NotNil(t, err)
 
 	// Create the environment, then it should work
@@ -166,7 +166,7 @@ func TestSecretFKConstraint(t *testing.T) {
 	_, err = db.CreateSecret("KEY", "val", env.ID)
 	require.Nil(t, err)
 
-	_, err = db.CreatePolicy("p1", []string{"*"}, []string{"*"}, []string{"*"}, env.ID)
+	_, err = db.CreatePolicy("p1", "", []string{"*"}, []string{"*"}, []string{"*"}, "", env.ID)
 	require.Nil(t, err)
 }
 
@@ -270,7 +270,7 @@ func TestPolicyCRUD(t *testing.T) {
 	require.Nil(t, err)
 
 	// Create
-	p, err := db.CreatePolicy("Allow prod", []string{"myorg/*"}, []string{"refs/heads/main"}, []string{"*"}, envProd.ID)
+	p, err := db.CreatePolicy("Allow prod", "", []string{"myorg/*"}, []string{"refs/heads/main"}, []string{"*"}, "", envProd.ID)
 	require.Nil(t, err)
 	require.NotEqual(t, "", p.ID)
 
@@ -288,7 +288,7 @@ func TestPolicyCRUD(t *testing.T) {
 	require.Equal(t, 1, len(policies))
 
 	// Update
-	err = db.UpdatePolicy(p.ID, "Updated", []string{"other/*"}, []string{"*"}, []string{"*"}, envStaging.ID)
+	err = db.UpdatePolicy(p.ID, "Updated", "", []string{"other/*"}, []string{"*"}, []string{"*"}, "", envStaging.ID)
 	require.Nil(t, err)
 
 	got, _ = db.GetPolicy(p.ID)
@@ -321,22 +321,22 @@ func TestMatchingPolicies(t *testing.T) {
 	envOther, err := db.CreateEnvironment("other", "prod")
 	require.Nil(t, err)
 
-	db.CreatePolicy("p1", []string{"myorg/*"}, []string{"refs/heads/main"}, []string{"*"}, envProd.ID)
-	db.CreatePolicy("p2", []string{"myorg/specific"}, []string{"*"}, []string{"*"}, envDev.ID)
-	db.CreatePolicy("p3", []string{"other/*"}, []string{"*"}, []string{"*"}, envOther.ID)
+	db.CreatePolicy("p1", "", []string{"myorg/*"}, []string{"refs/heads/main"}, []string{"*"}, "", envProd.ID)
+	db.CreatePolicy("p2", "", []string{"myorg/specific"}, []string{"*"}, []string{"*"}, "", envDev.ID)
+	db.CreatePolicy("p3", "", []string{"other/*"}, []string{"*"}, []string{"*"}, "", envOther.ID)
 
 	// Should match p1 only
-	matched, err := db.MatchingPolicies("myorg/repo", "refs/heads/main", "someone")
+	matched, err := db.MatchingPolicies("myorg/repo", "refs/heads/main", "someone", "")
 	require.Nil(t, err)
 	assert.False(t, len(matched) != 1 || matched[0].Name != "p1")
 
 	// Should match p1 and p2
-	matched, err = db.MatchingPolicies("myorg/specific", "refs/heads/main", "someone")
+	matched, err = db.MatchingPolicies("myorg/specific", "refs/heads/main", "someone", "")
 	require.Nil(t, err)
 	assert.Equal(t, 2, len(matched))
 
 	// No match
-	matched, err = db.MatchingPolicies("unknown/repo", "refs/heads/main", "someone")
+	matched, err = db.MatchingPolicies("unknown/repo", "refs/heads/main", "someone", "")
 	require.Nil(t, err)
 	assert.Equal(t, 0, len(matched))
 }
@@ -346,21 +346,21 @@ func TestMatchingPoliciesActorFilter(t *testing.T) {
 	env, err := db.CreateEnvironment("app", "prod")
 	require.Nil(t, err)
 
-	db.CreatePolicy("deployers-only", []string{"myorg/*"}, []string{"*"}, []string{"deploy-*"}, env.ID)
+	db.CreatePolicy("deployers-only", "", []string{"myorg/*"}, []string{"*"}, []string{"deploy-*"}, "", env.ID)
 
 	// Actor matches glob
-	matched, err := db.MatchingPolicies("myorg/repo", "refs/heads/main", "deploy-bot")
+	matched, err := db.MatchingPolicies("myorg/repo", "refs/heads/main", "deploy-bot", "")
 	require.Nil(t, err)
 	assert.Equal(t, 1, len(matched))
 
 	// Actor does not match glob
-	matched, err = db.MatchingPolicies("myorg/repo", "refs/heads/main", "random-user")
+	matched, err = db.MatchingPolicies("myorg/repo", "refs/heads/main", "random-user", "")
 	require.Nil(t, err)
 	assert.Equal(t, 0, len(matched))
 
 	// Wildcard actor pattern matches anyone
-	db.CreatePolicy("open", []string{"myorg/*"}, []string{"*"}, []string{"*"}, env.ID)
-	matched, err = db.MatchingPolicies("myorg/repo", "refs/heads/main", "random-user")
+	db.CreatePolicy("open", "", []string{"myorg/*"}, []string{"*"}, []string{"*"}, "", env.ID)
+	matched, err = db.MatchingPolicies("myorg/repo", "refs/heads/main", "random-user", "")
 	require.Nil(t, err)
 	assert.Equal(t, 1, len(matched))
 }
@@ -375,7 +375,7 @@ func TestDashboardStats(t *testing.T) {
 	db.CreateSecret("A", "1", envProd.ID)
 	db.CreateSecret("B", "2", envProd.ID)
 	db.CreateSecret("C", "3", envDev.ID)
-	db.CreatePolicy("p1", []string{"*"}, []string{"*"}, []string{"*"}, envProd.ID)
+	db.CreatePolicy("p1", "", []string{"*"}, []string{"*"}, []string{"*"}, "", envProd.ID)
 
 	stats, err := db.GetDashboardStats()
 	require.Nil(t, err)
@@ -423,10 +423,10 @@ func TestUpdatePolicyInvalidEnvironment(t *testing.T) {
 	env, err := db.CreateEnvironment("myapp", "prod")
 	require.Nil(t, err)
 
-	p, err := db.CreatePolicy("p1", []string{"*"}, []string{"*"}, []string{"*"}, env.ID)
+	p, err := db.CreatePolicy("p1", "", []string{"*"}, []string{"*"}, []string{"*"}, "", env.ID)
 	require.Nil(t, err)
 
-	err = db.UpdatePolicy(p.ID, "p1", []string{"*"}, []string{"*"}, []string{"*"}, "nonexistent-env-id")
+	err = db.UpdatePolicy(p.ID, "p1", "", []string{"*"}, []string{"*"}, []string{"*"}, "", "nonexistent-env-id")
 	require.NotNil(t, err)
 }
 
@@ -590,24 +590,24 @@ func TestMatchingPoliciesMultiRepoPattern(t *testing.T) {
 	env, err := db.CreateEnvironment("app", "prod")
 	require.Nil(t, err)
 
-	_, err = db.CreatePolicy("multi",
+	_, err = db.CreatePolicy("multi", "",
 		[]string{"org/api-*", "org/worker-*"},
 		[]string{"*"},
 		[]string{"*"},
-		env.ID)
+		"", env.ID)
 	require.Nil(t, err)
 
 	// Both prefixes match.
-	matched, err := db.MatchingPolicies("org/api-gateway", "refs/heads/main", "someone")
+	matched, err := db.MatchingPolicies("org/api-gateway", "refs/heads/main", "someone", "")
 	require.Nil(t, err)
 	assert.Equal(t, 1, len(matched))
 
-	matched, err = db.MatchingPolicies("org/worker-jobs", "refs/heads/main", "someone")
+	matched, err = db.MatchingPolicies("org/worker-jobs", "refs/heads/main", "someone", "")
 	require.Nil(t, err)
 	assert.Equal(t, 1, len(matched))
 
 	// Non-matching repo is rejected.
-	matched, err = db.MatchingPolicies("org/web", "refs/heads/main", "someone")
+	matched, err = db.MatchingPolicies("org/web", "refs/heads/main", "someone", "")
 	require.Nil(t, err)
 	assert.Equal(t, 0, len(matched))
 }
@@ -617,22 +617,22 @@ func TestMatchingPoliciesMultiRefPattern(t *testing.T) {
 	env, err := db.CreateEnvironment("app", "prod")
 	require.Nil(t, err)
 
-	_, err = db.CreatePolicy("prod-and-tags",
+	_, err = db.CreatePolicy("prod-and-tags", "",
 		[]string{"org/*"},
 		[]string{"refs/heads/main", "refs/tags/v*"},
 		[]string{"*"},
-		env.ID)
+		"", env.ID)
 	require.Nil(t, err)
 
-	matched, err := db.MatchingPolicies("org/repo", "refs/heads/main", "someone")
-	require.Nil(t, err)
-	assert.Equal(t, 1, len(matched))
-
-	matched, err = db.MatchingPolicies("org/repo", "refs/tags/v1.2.3", "someone")
+	matched, err := db.MatchingPolicies("org/repo", "refs/heads/main", "someone", "")
 	require.Nil(t, err)
 	assert.Equal(t, 1, len(matched))
 
-	matched, err = db.MatchingPolicies("org/repo", "refs/heads/dev", "someone")
+	matched, err = db.MatchingPolicies("org/repo", "refs/tags/v1.2.3", "someone", "")
+	require.Nil(t, err)
+	assert.Equal(t, 1, len(matched))
+
+	matched, err = db.MatchingPolicies("org/repo", "refs/heads/dev", "someone", "")
 	require.Nil(t, err)
 	assert.Equal(t, 0, len(matched))
 }
@@ -645,14 +645,14 @@ func TestMatchingPoliciesEmptyListIsWildcard(t *testing.T) {
 	env, err := db.CreateEnvironment("app", "prod")
 	require.Nil(t, err)
 
-	_, err = db.CreatePolicy("wild",
+	_, err = db.CreatePolicy("wild", "",
 		[]string{"org/*"},
 		nil, // empty ref patterns => match anything
 		nil, // empty actor patterns => match anyone
-		env.ID)
+		"", env.ID)
 	require.Nil(t, err)
 
-	matched, err := db.MatchingPolicies("org/repo", "refs/heads/weird-branch", "rando")
+	matched, err := db.MatchingPolicies("org/repo", "refs/heads/weird-branch", "rando", "")
 	require.Nil(t, err)
 	assert.Equal(t, 1, len(matched))
 }
@@ -707,21 +707,21 @@ func TestMatchingPoliciesInvalidGlobSkips(t *testing.T) {
 	// CreatePolicy's validation doesn't reject it. (CreatePolicy itself
 	// does not validate — validation lives in handlers via
 	// ValidatePatterns — so we can just use it here.)
-	_, err = db.CreatePolicy("bad",
+	_, err = db.CreatePolicy("bad", "",
 		[]string{"org/["},
 		[]string{"*"},
 		[]string{"*"},
-		env.ID)
+		"", env.ID)
 	require.Nil(t, err)
 
-	_, err = db.CreatePolicy("good",
+	_, err = db.CreatePolicy("good", "",
 		[]string{"org/*"},
 		[]string{"*"},
 		[]string{"*"},
-		env.ID)
+		"", env.ID)
 	require.Nil(t, err)
 
-	matched, err := db.MatchingPolicies("org/repo", "refs/heads/main", "someone")
+	matched, err := db.MatchingPolicies("org/repo", "refs/heads/main", "someone", "")
 	require.Nil(t, err)
 	// Only the good one matches; the bad one is skipped.
 	require.Equal(t, 1, len(matched))

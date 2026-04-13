@@ -16,24 +16,48 @@
     </div>
 
     <div class="form-group">
+        <label for="mode">Authorization Mode</label>
+        <select id="mode" name="mode" onchange="toggleMode()">
+            <option value="pattern" {{if or .IsNew (eq .Policy.Mode "pattern")}}selected{{end}}>Pattern matching (repo + ref + actor)</option>
+            <option value="github-environment" {{if and (not .IsNew) (eq .Policy.Mode "github-environment")}}selected{{end}}>GitHub Actions Environment</option>
+        </select>
+        <div class="hint">
+            <strong>Pattern matching</strong>: server checks repo, ref, and actor patterns.<br>
+            <strong>GitHub Actions Environment</strong>: server trusts GitHub's environment protection rules. Only repo and environment name are checked; ref/actor filtering is handled by GitHub.
+        </div>
+    </div>
+
+    <div class="form-group">
         <label for="repository_patterns">Repository Patterns</label>
         <textarea id="repository_patterns" name="repository_patterns" required rows="3"
             placeholder="wow-look-at-my/*&#10;owner/repo">{{if not .IsNew}}{{joinLines .Policy.RepositoryPatterns}}{{end}}</textarea>
         <div class="hint">One glob per line. A request is allowed if the repository matches any of these. Use owner/repo for a single repo, or owner/* for all repos in an org.</div>
     </div>
 
-    <div class="form-group">
-        <label for="ref_patterns">Ref Patterns</label>
-        <textarea id="ref_patterns" name="ref_patterns" rows="3"
-            placeholder="refs/heads/main&#10;refs/tags/v*">{{if .IsNew}}*{{else}}{{joinLines .Policy.RefPatterns}}{{end}}</textarea>
-        <div class="hint">One glob per line. Git ref filter (e.g. refs/heads/main). Use * to allow any branch or tag. Leave blank to match any ref.</div>
+    <div id="pattern-fields">
+        <div class="form-group">
+            <label for="ref_patterns">Ref Patterns</label>
+            <textarea id="ref_patterns" name="ref_patterns" rows="3"
+                placeholder="refs/heads/main&#10;refs/tags/v*">{{if .IsNew}}*{{else}}{{joinLines .Policy.RefPatterns}}{{end}}</textarea>
+            <div class="hint">One glob per line. Git ref filter (e.g. refs/heads/main). Use * to allow any branch or tag. Leave blank to match any ref.</div>
+        </div>
+
+        <div class="form-group">
+            <label for="actor_patterns">Actor Patterns</label>
+            <textarea id="actor_patterns" name="actor_patterns" rows="3"
+                placeholder="octocat&#10;my-team-*">{{if .IsNew}}*{{else}}{{joinLines .Policy.ActorPatterns}}{{end}}</textarea>
+            <div class="hint">One glob per line. GitHub username filter for who triggered the workflow. Use * to allow any actor. Leave blank to match any actor.</div>
+        </div>
     </div>
 
-    <div class="form-group">
-        <label for="actor_patterns">Actor Patterns</label>
-        <textarea id="actor_patterns" name="actor_patterns" rows="3"
-            placeholder="octocat&#10;my-team-*">{{if .IsNew}}*{{else}}{{joinLines .Policy.ActorPatterns}}{{end}}</textarea>
-        <div class="hint">One glob per line. GitHub username filter for who triggered the workflow. Use * to allow any actor. Leave blank to match any actor.</div>
+    <div id="github-env-fields" style="display:none">
+        <div class="form-group">
+            <label for="github_environment">GitHub Environment Name</label>
+            <input type="text" id="github_environment" name="github_environment"
+                value="{{if not .IsNew}}{{.Policy.GitHubEnvironment}}{{end}}"
+                placeholder="e.g. production">
+            <div class="hint">The exact GitHub Actions environment name from the workflow's <code>environment:</code> field. GitHub enforces branch restrictions, required reviewers, and wait timers for this environment — the secret-server trusts that enforcement.</div>
+        </div>
     </div>
 
     <div class="form-group">
@@ -59,5 +83,21 @@
         <a href="{{prefix}}/policies" class="btn">Cancel</a>
     </div>
 </form>
+
+<script>
+function toggleMode() {
+    var mode = document.getElementById('mode').value;
+    var patternFields = document.getElementById('pattern-fields');
+    var ghEnvFields = document.getElementById('github-env-fields');
+    if (mode === 'github-environment') {
+        patternFields.style.display = 'none';
+        ghEnvFields.style.display = '';
+    } else {
+        patternFields.style.display = '';
+        ghEnvFields.style.display = 'none';
+    }
+}
+toggleMode();
+</script>
 
 {{template "foot" .}}

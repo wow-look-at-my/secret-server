@@ -66,9 +66,10 @@ func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
 		"ref", claims.Ref,
 		"actor", claims.Actor,
 		"workflow", claims.Workflow,
+		"environment", claims.Environment,
 	)
 
-	policies, err := h.db.MatchingPolicies(claims.Repository, claims.Ref, claims.Actor)
+	policies, err := h.db.MatchingPolicies(claims.Repository, claims.Ref, claims.Actor, claims.Environment)
 	if err != nil {
 		slog.Error("failed to match policies", "error", err)
 		h.logAccessDenied("github_actions", claims.Repository, "policy_lookup_error", map[string]any{
@@ -136,6 +137,7 @@ func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
 		"ref":           claims.Ref,
 		"actor":         claims.Actor,
 		"workflow":      claims.Workflow,
+		"environment":   claims.Environment,
 		"policies":      policyIDs,
 		"secrets_count": len(result),
 	})

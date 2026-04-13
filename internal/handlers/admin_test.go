@@ -241,7 +241,7 @@ func TestAdminCreatePolicyInvalidGlob(t *testing.T) {
 func TestAdminUpdatePolicyMultiPattern(t *testing.T) {
 	env := setup(t)
 	envID := env.envID(t, "app", "prod")
-	p, _ := env.db.CreatePolicy("test", []string{"org/*"}, []string{"*"}, []string{"*"}, envID)
+	p, _ := env.db.CreatePolicy("test", "", []string{"org/*"}, []string{"*"}, []string{"*"}, "", envID)
 
 	h := NewAdminHandler(env.db, env.audit)
 	mux := chi.NewRouter()
@@ -263,7 +263,7 @@ func TestAdminUpdatePolicyMultiPattern(t *testing.T) {
 func TestAdminUpdatePolicyEmptyRepoPatterns(t *testing.T) {
 	env := setup(t)
 	envID := env.envID(t, "app", "prod")
-	p, _ := env.db.CreatePolicy("test", []string{"org/*"}, []string{"*"}, []string{"*"}, envID)
+	p, _ := env.db.CreatePolicy("test", "", []string{"org/*"}, []string{"*"}, []string{"*"}, "", envID)
 
 	h := NewAdminHandler(env.db, env.audit)
 	mux := chi.NewRouter()
@@ -280,7 +280,7 @@ func TestAdminUpdatePolicyEmptyRepoPatterns(t *testing.T) {
 func TestAdminUpdatePolicyInvalidGlob(t *testing.T) {
 	env := setup(t)
 	envID := env.envID(t, "app", "prod")
-	p, _ := env.db.CreatePolicy("test", []string{"org/*"}, []string{"*"}, []string{"*"}, envID)
+	p, _ := env.db.CreatePolicy("test", "", []string{"org/*"}, []string{"*"}, []string{"*"}, "", envID)
 
 	h := NewAdminHandler(env.db, env.audit)
 	mux := chi.NewRouter()
@@ -485,7 +485,7 @@ func TestAdminCreatePolicyInvalidEnvironment(t *testing.T) {
 func TestAdminUpdatePolicyInvalidEnvironment(t *testing.T) {
 	env := setup(t)
 	envID := env.envID(t, "app", "prod")
-	p, _ := env.db.CreatePolicy("test", []string{"org/*"}, []string{"*"}, []string{"*"}, envID)
+	p, _ := env.db.CreatePolicy("test", "", []string{"org/*"}, []string{"*"}, []string{"*"}, "", envID)
 	h := NewAdminHandler(env.db, env.audit)
 	mux := chi.NewRouter()
 	h.Register(mux)
