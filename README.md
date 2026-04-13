@@ -94,7 +94,7 @@ On upgrade from older versions, the schema is automatically migrated: existing p
 Policies control which GitHub Actions workflows can access which secrets. Each policy specifies:
 
 - **Repository patterns** — one or more glob patterns matching repository names (e.g. `myorg/*`, `myorg/api-*`). At least one is required. A request matches if the repository matches **any** of the listed globs.
-- **Ref patterns** — glob patterns matching git refs (e.g. `refs/heads/main`, `refs/tags/v*`). Leave empty or use `*` to allow any branch or tag.
+- **Ref patterns** — glob patterns matching git refs (e.g. `refs/heads/main`, `refs/tags/v*`). Use `**` to match across `/` boundaries (e.g. `refs/heads/**` matches `refs/heads/main` and merge queue refs like `refs/heads/gh-readonly-queue/…`). Leave empty or use `*` to allow any branch or tag.
 - **Actor patterns** — glob patterns matching the GitHub username that triggered the workflow (e.g. `deploy-*`). Leave empty or use `*` to allow any actor.
 - **Environment** — which secrets the policy grants access to (selected from managed environments, referenced by UUID).
 
