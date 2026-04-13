@@ -660,6 +660,7 @@ func TestMatchingPoliciesEmptyListIsWildcard(t *testing.T) {
 func TestValidatePatterns(t *testing.T) {
 	// Good patterns.
 	assert.Nil(t, ValidatePatterns([]string{"org/*", "refs/heads/main", "*"}))
+	assert.Nil(t, ValidatePatterns([]string{"refs/heads/**", "refs/**/main"}))
 	assert.Nil(t, ValidatePatterns(nil))
 
 	// Bad pattern — unmatched bracket.
