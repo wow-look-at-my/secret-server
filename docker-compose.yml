@@ -3,7 +3,7 @@ services:
     container_name: secret-server
     image: ghcr.io/wow-look-at-my/secret-server:latest
     volumes:
-      - /mnt/ssdpool/appdata/secret-server/data:/data
+      - data:/data
     environment:
       - LISTEN_ADDR=:8080
       - DATABASE_PATH=/data/secrets.db
@@ -15,6 +15,9 @@ services:
       - LOG_LEVEL=info
     networks:
       - nas-public-network
+
+volumes:
+  data:
 
 networks:
   nas-public-network:
