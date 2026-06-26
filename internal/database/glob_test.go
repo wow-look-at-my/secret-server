@@ -1,15 +1,15 @@
 package database
 
 import (
+	"github.com/stretchr/testify/assert"
 	"testing"
-	"github.com/wow-look-at-my/testify/assert"
 )
 
 func TestMatchGlob(t *testing.T) {
 	tests := []struct {
-		pattern	string
-		value	string
-		want	bool
+		pattern string
+		value   string
+		want    bool
 	}{
 		{"*", "anything", true},
 		{"*", "org/repo", true},

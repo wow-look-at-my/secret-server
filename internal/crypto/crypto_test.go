@@ -2,8 +2,8 @@ package crypto
 
 import (
 	"bytes"
+	"github.com/stretchr/testify/require"
 	"testing"
-	"github.com/wow-look-at-my/testify/require"
 )
 
 func TestEncryptDecrypt(t *testing.T) {
@@ -57,7 +57,7 @@ func TestDecryptTampered(t *testing.T) {
 	require.Nil(t, err)
 
 	ct, _ := enc.Encrypt([]byte("hello"))
-	ct[len(ct)-1] ^= 0xff	// tamper
+	ct[len(ct)-1] ^= 0xff // tamper
 
 	_, err = enc.Decrypt(ct)
 	require.NotNil(t, err)
