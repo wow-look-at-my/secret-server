@@ -15,11 +15,26 @@ This runs mod tidy, vet, tests with coverage, and builds. Do not use bare `go` c
 Two path prefixes for Cloudflare Access:
 
 - `/admin/*` — protected (API + web UI)
-- `/github/*` — bypassed (GitHub Actions OIDC)
+- `/github/*` — bypassed (GitHub Actions OIDC **or** machine token)
 - `/health` — not routed through CF Access (Docker/uptime checks)
 
 Route constants are in `internal/handlers/routes.go`. Templates use `{{prefix}}` to
 reference the admin UI prefix.
+
+- **Two credential types, one vend endpoint**: `GET /github/v1/secrets` accepts
+  both a GitHub Actions OIDC JWT (policy-matched on repo/ref/actor) and a
+  **machine token** (`sst_…`, bound to one environment). `PublicHandler.fetchSecrets`
+  inspects the bearer token — the `database.MachineTokenPrefix` routes it to
+  `fetchSecretsMachine`, otherwise it's validated as OIDC. Sharing the route means
+  no extra CF Access bypass path. Machine tokens are for clients that can't present
+  an OIDC token (e.g. webhook-runner hooks). See README "Machine Tokens".
+- **Machine tokens** live in the `machine_tokens` table (`internal/database/machine_tokens.go`):
+  only the SHA-256 hash is stored, the plaintext (`sst_` + base64url random) is
+  returned once at creation. Admin CRUD is in `admin.go`/`ui_machine_tokens.go`
+  (`/admin/v1/machine-tokens`, and the **Machine Tokens** UI page). The token *is*
+  the grant — it vends every secret in its environment, no policy match — so scope
+  by environment. Every vend is audited as `secret.access` (actor type
+  `machine_token`).
 
 - **Encryption at rest**: Secrets are AES-256-GCM encrypted in SQLite, base64-encoded. Decrypted only in memory on retrieval.
 - **Managed environments**: Project/environment pairs are first-class entities with UUID primary keys. Secrets and policies reference them by `environment_id` (FK), not by string tuple. Environments can be renamed without updating referencing rows. Auto-migrated from legacy string-column schema on upgrade.

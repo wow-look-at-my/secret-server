@@ -206,10 +206,11 @@ func (d *DB) GetSecretsByEnvironmentID(environmentID string) (map[string]string,
 
 // DashboardStats returns counts for the dashboard.
 type DashboardStats struct {
-	TotalSecrets      int
-	TotalPolicies     int
-	TotalEnvironments int
-	Projects          []ProjectStats
+	TotalSecrets       int
+	TotalPolicies      int
+	TotalEnvironments  int
+	TotalMachineTokens int
+	Projects           []ProjectStats
 }
 
 type ProjectStats struct {
@@ -239,6 +240,12 @@ func (d *DB) GetDashboardStats() (*DashboardStats, error) {
 		return nil, err
 	}
 	stats.TotalEnvironments = int(envCount)
+
+	tokenCount, err := d.q.CountMachineTokens(ctx)
+	if err != nil {
+		return nil, err
+	}
+	stats.TotalMachineTokens = int(tokenCount)
 
 	rows, err := d.q.SecretCountsByProjectEnv(ctx)
 	if err != nil {

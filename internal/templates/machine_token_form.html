@@ -1,0 +1,39 @@
+{{template "head" .}}
+{{define "title"}}New Machine Token - Secret Server{{end}}
+
+<h1>New Machine Token</h1>
+
+{{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+
+<form method="post" action="{{prefix}}/machine-tokens">
+    {{with csrfToken}}<input type="hidden" name="csrf_token" value="{{.}}">{{end}}
+    <div class="form-group">
+        <label for="name">Name</label>
+        <input type="text" id="name" name="name" required
+            value="{{if .Form}}{{index .Form "name" 0}}{{end}}"
+            placeholder="e.g. pr-minder-reconcile">
+        <div class="hint">A label so you can recognize this token in the list and the audit log. Not secret.</div>
+    </div>
+
+    <div class="form-group">
+        <label for="env_id">Project / Environment</label>
+        {{if .Environments}}
+        <select id="env_id" name="env_id" required>
+            <option value="">-- Select Environment --</option>
+            {{range .Environments}}
+            <option value="{{.ID}}">{{.Project}} / {{.Environment}}</option>
+            {{end}}
+        </select>
+        {{else}}
+        <p class="no-env">No environments defined yet. <a href="{{prefix}}/environments/new">Create one</a> first.</p>
+        {{end}}
+        <div class="hint">The token can read every secret in this environment. <a href="{{prefix}}/environments">Manage environments</a>.</div>
+    </div>
+
+    <div class="actions">
+        <button type="submit" class="btn btn-primary">Create</button>
+        <a href="{{prefix}}/machine-tokens" class="btn">Cancel</a>
+    </div>
+</form>
+
+{{template "foot" .}}

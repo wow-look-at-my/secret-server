@@ -5,6 +5,7 @@
 package sqlcdb
 
 import (
+	"database/sql"
 	"time"
 )
 
@@ -34,6 +35,16 @@ type Environment struct {
 	Project     string
 	Environment string
 	CreatedAt   time.Time
+}
+
+type MachineToken struct {
+	ID            string
+	Name          string
+	TokenHash     string
+	TokenPrefix   string
+	EnvironmentID string
+	CreatedAt     time.Time
+	LastUsedAt    sql.NullTime
 }
 
 type Secret struct {

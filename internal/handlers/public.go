@@ -50,6 +50,15 @@ func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
 	}
 	token := strings.TrimPrefix(authHeader, "Bearer ")
 
+	// Two credential types share this endpoint. A machine token (issued for
+	// non-Actions clients that can't present a GitHub OIDC JWT) is recognizable
+	// by its prefix; anything else is validated as an OIDC token. Keeping both
+	// on one route means no extra Cloudflare Access bypass path to configure.
+	if strings.HasPrefix(token, database.MachineTokenPrefix) {
+		h.fetchSecretsMachine(w, r, token)
+		return
+	}
+
 	claims, err := h.oidc.ValidateToken(r.Context(), token)
 	if err != nil {
 		slog.Warn("OIDC validation failed", "error", err)
@@ -145,4 +154,68 @@ func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
+}
+
+// fetchSecretsMachine vends secrets to a machine token (a bearer credential for
+// clients that can't present a GitHub OIDC JWT, e.g. webhook-runner hooks). The
+// token is bound to exactly one environment; access is the token's existence,
+// not a policy match. Mirrors fetchSecrets' audit/deny shape.
+func (h *PublicHandler) fetchSecretsMachine(w http.ResponseWriter, r *http.Request, token string) {
+	rec, err := h.db.LookupMachineToken(token)
+	if err != nil {
+		slog.Error("machine token lookup failed", "error", err)
+		h.logAccessDenied("machine_token", "unknown", "machine_token_lookup_error", map[string]any{
+			"remote_addr": r.RemoteAddr,
+			"error":       err.Error(),
+		})
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+	if rec == nil {
+		// Unknown or revoked token. Never echo the token itself.
+		h.logAccessDenied("machine_token", "unknown", "invalid_machine_token", map[string]any{
+			"remote_addr": r.RemoteAddr,
+		})
+		http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+		return
+	}
+
+	slog.Info("machine token validated",
+		"token_id", rec.ID,
+		"token_name", rec.Name,
+		"project", rec.Project,
+		"environment", rec.Environment,
+	)
+
+	// Record usage best-effort — a failed timestamp update must not block the vend.
+	if err := h.db.TouchMachineToken(rec.ID); err != nil {
+		slog.Warn("failed to record machine token usage", "token_id", rec.ID, "error", err)
+	}
+
+	secrets, err := h.db.GetSecretsByEnvironmentID(rec.EnvironmentID)
+	if err != nil {
+		slog.Error("failed to get secrets for machine token", "token_id", rec.ID, "error", err)
+		h.logAccessDenied("machine_token", rec.Name, "secret_retrieval_error", map[string]any{
+			"token_id":    rec.ID,
+			"project":     rec.Project,
+			"environment": rec.Environment,
+			"error":       err.Error(),
+		})
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	details, _ := json.Marshal(map[string]any{
+		"token_id":      rec.ID,
+		"token_name":    rec.Name,
+		"project":       rec.Project,
+		"environment":   rec.Environment,
+		"secrets_count": len(secrets),
+	})
+	if err := h.audit.CreateEntry("secret.access", "machine_token", rec.Name, "secret", rec.ID, string(details)); err != nil {
+		slog.Error("audit log failed", "error", err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(secrets)
 }

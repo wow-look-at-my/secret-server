@@ -56,6 +56,9 @@ func (h *AdminHandler) Register(r chi.Router) {
 	r.Post(p+"/environments", h.createEnvironment)
 	r.Put(p+"/environments/{id}", h.updateEnvironment)
 	r.Delete(p+"/environments/{id}", h.deleteEnvironment)
+	r.Get(p+"/machine-tokens", h.listMachineTokens)
+	r.Post(p+"/machine-tokens", h.createMachineToken)
+	r.Delete(p+"/machine-tokens/{id}", h.deleteMachineToken)
 }
 
 func adminActor(r *http.Request) string {
@@ -473,6 +476,84 @@ func (h *AdminHandler) deleteEnvironment(w http.ResponseWriter, r *http.Request)
 
 	details, _ := json.Marshal(map[string]string{"project": env.Project, "environment": env.Environment})
 	if err := h.audit.CreateEntry("environment.delete", "admin", adminActor(r), "environment", id, string(details)); err != nil {
+		slog.Error("audit log failed", "error", err)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- Machine tokens ---
+
+func (h *AdminHandler) listMachineTokens(w http.ResponseWriter, r *http.Request) {
+	tokens, err := h.db.ListMachineTokens()
+	if err != nil {
+		http.Error(w, `{"error":"failed to list machine tokens"}`, http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(tokens)
+}
+
+func (h *AdminHandler) createMachineToken(w http.ResponseWriter, r *http.Request) {
+	if !requireJSON(w, r) {
+		return
+	}
+	var req struct {
+		Name          string `json:"name"`
+		EnvironmentID string `json:"environment_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+	if req.Name == "" || req.EnvironmentID == "" {
+		http.Error(w, `{"error":"name and environment_id are required"}`, http.StatusBadRequest)
+		return
+	}
+	if !validUUID(req.EnvironmentID) {
+		http.Error(w, `{"error":"environment_id must be a valid UUID"}`, http.StatusBadRequest)
+		return
+	}
+
+	env, err := h.db.GetEnvironment(req.EnvironmentID)
+	if err != nil {
+		http.Error(w, `{"error":"failed to look up environment"}`, http.StatusInternalServerError)
+		return
+	}
+	if env == nil {
+		http.Error(w, `{"error":"environment not found"}`, http.StatusBadRequest)
+		return
+	}
+
+	token, rec, err := h.db.CreateMachineToken(req.Name, req.EnvironmentID)
+	if err != nil {
+		http.Error(w, `{"error":"failed to create machine token"}`, http.StatusInternalServerError)
+		return
+	}
+
+	details, _ := json.Marshal(map[string]string{"name": req.Name, "project": env.Project, "environment": env.Environment})
+	if err := h.audit.CreateEntry("machine_token.create", "admin", adminActor(r), "machine_token", rec.ID, string(details)); err != nil {
+		slog.Error("audit log failed", "error", err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	// The plaintext token is returned exactly once — only its hash is stored.
+	json.NewEncoder(w).Encode(map[string]string{"id": rec.ID, "token": token})
+}
+
+func (h *AdminHandler) deleteMachineToken(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if err := h.db.DeleteMachineToken(id); err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			http.Error(w, `{"error":"machine token not found"}`, http.StatusNotFound)
+			return
+		}
+		http.Error(w, `{"error":"failed to delete machine token"}`, http.StatusInternalServerError)
+		return
+	}
+
+	if err := h.audit.CreateEntry("machine_token.delete", "admin", adminActor(r), "machine_token", id, "{}"); err != nil {
 		slog.Error("audit log failed", "error", err)
 	}
 

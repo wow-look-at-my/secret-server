@@ -108,7 +108,32 @@ func (d *DB) migrate() error {
 		return fmt.Errorf("migrate policy pattern lists: %w", err)
 	}
 
+	// Machine tokens (bearer credentials for non-Actions clients). Added after
+	// the env-id/pattern migrations so the environments table it references
+	// already exists. Idempotent CREATE — present on fresh installs too.
+	if err := d.migrateMachineTokens(); err != nil {
+		return fmt.Errorf("migrate machine tokens: %w", err)
+	}
+
 	return nil
+}
+
+// migrateMachineTokens creates the machine_tokens table and its index if they
+// do not already exist. Idempotent — safe on every startup.
+func (d *DB) migrateMachineTokens() error {
+	_, err := d.db.Exec(`
+		CREATE TABLE IF NOT EXISTS machine_tokens (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			token_hash TEXT NOT NULL UNIQUE,
+			token_prefix TEXT NOT NULL DEFAULT '',
+			environment_id TEXT NOT NULL REFERENCES environments(id),
+			created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+			last_used_at DATETIME
+		);
+		CREATE INDEX IF NOT EXISTS idx_machine_tokens_env_id ON machine_tokens(environment_id);
+	`)
+	return err
 }
 
 // hasPolicyColumn reports whether the access_policies table has a column

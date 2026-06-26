@@ -1,0 +1,46 @@
+{{template "head" .}}
+{{define "title"}}Machine Tokens - Secret Server{{end}}
+
+<div class="toolbar">
+    <h1>Machine Tokens</h1>
+    <a href="{{prefix}}/machine-tokens/new" class="btn btn-primary">New Machine Token</a>
+</div>
+<p class="page-desc">Machine tokens are bearer credentials for clients that can't present a GitHub Actions OIDC token (e.g. webhook-runner hooks). Each token is bound to one environment; presenting it to <code>GET /github/v1/secrets</code> vends that environment's secrets. Only the token's hash is stored — the value is shown once, at creation.</p>
+
+{{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+
+{{if .Tokens}}
+<table>
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Token</th>
+            <th>Environment</th>
+            <th>Created</th>
+            <th>Last Used</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{range .Tokens}}
+        <tr>
+            <td>{{.Name}}</td>
+            <td><code>{{.TokenPrefix}}…</code></td>
+            <td>{{.Project}} / {{.Environment}}</td>
+            <td>{{.CreatedAt.Format "2006-01-02 15:04"}}</td>
+            <td>{{if .LastUsedAt}}{{.LastUsedAt.Format "2006-01-02 15:04"}}{{else}}<span class="empty">never</span>{{end}}</td>
+            <td>
+                <form class="inline" method="post" action="{{prefix}}/machine-tokens/{{.ID}}/delete" onsubmit="return confirm('Revoke this machine token? Any client using it will immediately lose access.')">
+                    {{with csrfToken}}<input type="hidden" name="csrf_token" value="{{.}}">{{end}}
+                    <button type="submit" class="btn btn-sm btn-danger">Revoke</button>
+                </form>
+            </td>
+        </tr>
+        {{end}}
+    </tbody>
+</table>
+{{else}}
+<p class="empty">No machine tokens yet. <a href="{{prefix}}/machine-tokens/new">Create one</a> to let a non-Actions client fetch secrets.</p>
+{{end}}
+
+{{template "foot" .}}

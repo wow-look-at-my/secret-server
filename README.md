@@ -6,11 +6,31 @@ Self-hosted secrets manager for homelab use. Single Go binary with SQLite storag
 
 | Zone | Routes | Auth | Access |
 |------|--------|------|--------|
-| GitHub API | `GET /github/v1/secrets` | GitHub Actions OIDC JWT | Read-only — vend secrets matching policies |
-| Admin API | `/admin/v1/*` | Cloudflare Access JWT | Create, update, delete secrets, policies, and environments |
-| Admin UI | `/admin/*` | Cloudflare Access JWT | Web UI for managing secrets, policies, and environments |
+| GitHub API | `GET /github/v1/secrets` | GitHub Actions OIDC JWT **or** machine token | Read-only — vend secrets matching policies (OIDC) or the token's environment (machine token) |
+| Admin API | `/admin/v1/*` | Cloudflare Access JWT | Create, update, delete secrets, policies, environments, and machine tokens |
+| Admin UI | `/admin/*` | Cloudflare Access JWT | Web UI for managing secrets, policies, environments, and machine tokens |
 
 Two path prefixes for Cloudflare Access: protect `/admin/*`, bypass `/github/*`. The GitHub API validates OIDC tokens directly. Admin routes are protected by Cloudflare Access (the server validates CF JWTs as defense-in-depth). The root path `/` redirects to the admin UI. `GET /health` is available for Docker/uptime checks (not routed through CF Access).
+
+## Machine Tokens
+
+GitHub Actions OIDC is the right credential for a workflow, but some clients can't present an OIDC token — e.g. a [webhook-runner](https://github.com/wow-look-at-my/webhook-runner) hook running in a plain Docker container. **Machine tokens** fill that gap: a long-lived bearer credential, bound to exactly one environment, that a non-Actions client presents to the *same* `GET /github/v1/secrets` endpoint.
+
+- **Shape:** `sst_<random>`. The server inspects the bearer token — the `sst_` prefix routes it to machine-token validation; anything else is validated as an OIDC JWT. Both share one route, so there is no extra Cloudflare Access bypass path to configure.
+- **Storage:** only the token's SHA-256 hash is stored. The plaintext is shown **once**, at creation, and cannot be recovered — lose it and you revoke + reissue.
+- **Access:** a machine token vends every secret in its bound environment (no repo/ref/actor policy match — the token *is* the grant). Scope it by putting only what that client needs in its environment.
+- **Management:** create, list (by name + prefix), and revoke tokens on the **Machine Tokens** page in the admin UI, or via `POST/GET/DELETE /admin/v1/machine-tokens` in the admin API. `POST` returns `{"id","token"}` — the only time the token is exposed.
+- **Audit:** every machine-token vend is recorded as a `secret.access` entry with actor type `machine_token` (and the token's name), the same as an OIDC `secret.access`. Denied attempts (unknown/revoked token) are `secret.access.denied`.
+
+Example fetch (the bound environment's secrets come back as a JSON object):
+
+```bash
+curl -fsSL -H "Authorization: Bearer $SECRET_SERVER_TOKEN" \
+  https://secrets.example.com/github/v1/secrets
+# {"GITHUB_APP_PRIVATE_KEY":"-----BEGIN ...","OTHER_SECRET":"..."}
+```
+
+Treat the token as sensitive: it is a single bearer factor to its environment's secrets. It is, however, network-gated (only useful against your secret-server), policy-free but environment-scoped, centrally revocable in one click, and every use is audited — which is why it is a better home for a high-value key than scattering that key across client hosts/configs.
 
 ## Configuration
 

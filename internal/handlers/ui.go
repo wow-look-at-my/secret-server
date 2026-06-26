@@ -60,6 +60,10 @@ func (h *UIHandler) Register(r chi.Router) {
 	r.Post(p+"/environments", h.createEnvironment)
 	r.Post(p+"/environments/{id}", h.updateEnvironment)
 	r.Post(p+"/environments/{id}/delete", h.deleteEnvironmentForm)
+	r.Get(p+"/machine-tokens", h.listMachineTokens)
+	r.Get(p+"/machine-tokens/new", h.newMachineToken)
+	r.Post(p+"/machine-tokens", h.createMachineToken)
+	r.Post(p+"/machine-tokens/{id}/delete", h.deleteMachineTokenForm)
 	r.Get(p+"/audit", h.auditLog)
 	r.Get(p+"/style.css", h.tmpl.ServeCSS)
 	// Redirect /admin (no trailing slash) to /admin/
