@@ -4,8 +4,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/wow-look-at-my/testify/assert"
-	"github.com/wow-look-at-my/testify/require"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func testAuditDB(t *testing.T) *AuditDB {
@@ -84,4 +84,28 @@ func TestAuditDefaultLimit(t *testing.T) {
 	entries, err := db.ListEntries(0, 0)
 	require.Nil(t, err)
 	assert.Equal(t, 1, len(entries))
+}
+
+func TestAuditPersistence(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "test-audit-*.db")
+	require.Nil(t, err)
+	f.Close()
+	path := f.Name()
+
+	// Write an entry then close.
+	db1, err := NewAuditDB(path)
+	require.Nil(t, err)
+	err = db1.CreateEntry("secret.create", "admin", "user@test.com", "secret", "abc123", "{}")
+	require.Nil(t, err)
+	require.Nil(t, db1.Close())
+
+	// Reopen and verify the entry survived.
+	db2, err := NewAuditDB(path)
+	require.Nil(t, err)
+	t.Cleanup(func() { db2.Close() })
+	entries, err := db2.ListEntries(10, 0)
+	require.Nil(t, err)
+	require.Equal(t, 1, len(entries))
+	assert.Equal(t, "secret.create", entries[0].Action)
+	assert.Equal(t, "abc123", entries[0].ResourceID)
 }

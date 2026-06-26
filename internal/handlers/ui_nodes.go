@@ -78,7 +78,7 @@ func (h *UIHandler) editNodeForm(w http.ResponseWriter, r *http.Request) {
 		"ParentID": parentID,
 		"Groups":   parents,
 	}
-	if s := base64JSONStructure(value); s != "" {
+	if s := base64JSONDecode(value); s != "" {
 		data["JSONStructure"] = s
 	}
 	h.tmpl.Render(w, r, "node_form.html", data)

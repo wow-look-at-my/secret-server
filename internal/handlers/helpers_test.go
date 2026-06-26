@@ -12,11 +12,11 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
+	"github.com/stretchr/testify/require"
 	"github.com/wow-look-at-my/secret-server/internal/auth"
 	"github.com/wow-look-at-my/secret-server/internal/crypto"
 	"github.com/wow-look-at-my/secret-server/internal/database"
 	"github.com/wow-look-at-my/secret-server/internal/templates"
-	"github.com/wow-look-at-my/testify/require"
 )
 
 type testEnv struct {

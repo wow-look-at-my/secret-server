@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/wow-look-at-my/testify/assert"
-	"github.com/wow-look-at-my/testify/require"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestUIViewNode exercises the single-node view page, which walks the
@@ -67,25 +67,26 @@ func TestUIViewNodeNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, rr.Code)
 }
 
-func TestUIBase64JSONStructure(t *testing.T) {
-	// Unit test for the helper. Valid base64-encoded JSON.
+func TestUIBase64JSONDecode(t *testing.T) {
+	// Unit test for the helper. Valid base64-encoded JSON — full decode, not
+	// redacted, per master #57.
 	plain := `{"user":"alice","count":42}`
 	encoded := base64.StdEncoding.EncodeToString([]byte(plain))
-	got := base64JSONStructure(encoded)
-	assert.Contains(t, got, `"count": "..."`)
-	assert.Contains(t, got, `"user": "..."`)
+	got := base64JSONDecode(encoded)
+	assert.Contains(t, got, `"user": "alice"`)
+	assert.Contains(t, got, `"count": 42`)
 
 	// URL-safe base64 also works.
 	urlEnc := base64.URLEncoding.EncodeToString([]byte(plain))
-	got = base64JSONStructure(urlEnc)
+	got = base64JSONDecode(urlEnc)
 	assert.NotEqual(t, "", got)
 
 	// Non-base64 gives empty.
-	assert.Equal(t, "", base64JSONStructure("!!!"))
+	assert.Equal(t, "", base64JSONDecode("!!!"))
 
 	// Base64-encoded but not a JSON object gives empty.
 	notJSON := base64.StdEncoding.EncodeToString([]byte("not json"))
-	assert.Equal(t, "", base64JSONStructure(notJSON))
+	assert.Equal(t, "", base64JSONDecode(notJSON))
 }
 
 func TestUIEditNodeFormSecret(t *testing.T) {

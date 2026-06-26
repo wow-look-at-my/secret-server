@@ -22,13 +22,14 @@
         <label for="value">Value</label>
         <div class="input-wrap">
             <input type="password" id="value" name="value" {{if .IsNew}}required{{end}}
+                value="{{if .IsNew}}{{else}}{{.Value}}{{end}}"
                 placeholder="{{if .IsNew}}Secret value{{else}}Leave blank to keep current value{{end}}">
             <button type="button" class="btn btn-sm" onclick="toggleValue()">Show</button>
         </div>
         <div class="hint">The sensitive value to encrypt and store.</div>
         {{if .JSONStructure}}
         <details class="json-details">
-            <summary>Base64-encoded JSON detected — view structure</summary>
+            <summary>Base64-encoded JSON detected — view decoded</summary>
             <pre>{{.JSONStructure}}</pre>
         </details>
         {{end}}

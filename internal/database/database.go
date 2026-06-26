@@ -348,9 +348,9 @@ func (d *DB) readLegacyPolicies(ctx context.Context) ([]legacyPolicy, error) {
 	var out []legacyPolicy
 	for rows.Next() {
 		var (
-			id, name                            string
-			repoCol, refCol, actorCol           string
-			createdAt                           time.Time
+			id, name                  string
+			repoCol, refCol, actorCol string
+			createdAt                 time.Time
 		)
 		if err := rows.Scan(&id, &name, &repoCol, &refCol, &actorCol, &createdAt); err != nil {
 			return nil, err
@@ -417,4 +417,3 @@ func columnExists(ctx context.Context, db *sql.DB, table, column string) (bool, 
 	}
 	return false, rows.Err()
 }
-

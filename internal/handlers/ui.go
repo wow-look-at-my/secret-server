@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -226,10 +225,10 @@ func (h *UIHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// base64JSONStructure tries to base64-decode a value and parse it as JSON.
-// If the value is a base64-encoded JSON object, returns a redacted version
-// showing only top-level keys with "..." as values. Returns empty otherwise.
-func base64JSONStructure(value string) string {
+// base64JSONDecode tries to base64-decode a value and parse it as JSON.
+// If the value is a base64-encoded JSON object, it returns pretty-printed JSON.
+// Returns empty string otherwise.
+func base64JSONDecode(value string) string {
 	decoded, err := base64.StdEncoding.DecodeString(value)
 	if err != nil {
 		decoded, err = base64.URLEncoding.DecodeString(value)
@@ -241,14 +240,7 @@ func base64JSONStructure(value string) string {
 	if err := json.Unmarshal(decoded, &obj); err != nil {
 		return ""
 	}
-	redacted := make(map[string]string, len(obj))
-	keys := make([]string, 0, len(obj))
-	for k := range obj {
-		keys = append(keys, k)
-		redacted[k] = "..."
-	}
-	sort.Strings(keys)
-	out, err := json.MarshalIndent(redacted, "", "  ")
+	out, err := json.MarshalIndent(obj, "", "  ")
 	if err != nil {
 		return ""
 	}

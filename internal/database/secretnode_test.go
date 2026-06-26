@@ -4,9 +4,9 @@ import (
 	"database/sql"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	sqlcdb "github.com/wow-look-at-my/secret-server/internal/database/sqlc"
-	"github.com/wow-look-at-my/testify/assert"
-	"github.com/wow-look-at-my/testify/require"
 )
 
 func TestSecretChildrenReturnsNil(t *testing.T) {
