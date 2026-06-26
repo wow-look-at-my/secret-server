@@ -1,10 +1,10 @@
 package templates
 
 import (
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"net/http/httptest"
 	"testing"
-	"github.com/wow-look-at-my/testify/assert"
-	"github.com/wow-look-at-my/testify/require"
 )
 
 func TestNewTemplates(t *testing.T) {
@@ -22,16 +22,16 @@ func TestRenderDashboard(t *testing.T) {
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/admin/", nil)
 	data := struct {
-		TotalSecrets	int
-		TotalPolicies	int
-		Projects	[]struct {
-			Project		string
-			Environment	string
-			SecretCount	int
+		TotalSecrets  int
+		TotalPolicies int
+		Projects      []struct {
+			Project     string
+			Environment string
+			SecretCount int
 		}
 	}{
-		TotalSecrets:	5,
-		TotalPolicies:	2,
+		TotalSecrets:  5,
+		TotalPolicies: 2,
 	}
 	tmpl.Render(rr, req, "dashboard.html", data)
 
@@ -47,9 +47,9 @@ func TestRenderSecretsList(t *testing.T) {
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/admin/secrets", nil)
 	tmpl.Render(rr, req, "secrets_list.html", map[string]any{
-		"Secrets":	[]any{},
-		"Project":	"",
-		"Environment":	"",
+		"Secrets":     []any{},
+		"Project":     "",
+		"Environment": "",
 	})
 	assert.Equal(t, 200, rr.Code)
 
