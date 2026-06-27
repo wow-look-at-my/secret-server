@@ -1,0 +1,16 @@
+{{define "nodeTree"}}
+<ul class="node-tree">
+    {{range .}}
+    <li class="node-tree-item node-kind-{{.Kind}}{{if not .HasEffectivePolicies}} node-unreachable{{end}}">
+        <span class="node-row">
+            {{if eq .Kind "group"}}<span class="node-icon" aria-hidden="true">[+]</span>{{else}}<span class="node-icon" aria-hidden="true">[-]</span>{{end}}
+            <a href="{{prefix}}/secrets/{{.ID}}">{{.Name}}</a>
+            {{if not .HasEffectivePolicies}}<span class="node-warning" title="No policies attached at this node or any ancestor">no policies</span>{{end}}
+        </span>
+        {{if .Children}}
+        {{template "nodeTree" .Children}}
+        {{end}}
+    </li>
+    {{end}}
+</ul>
+{{end}}

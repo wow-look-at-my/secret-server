@@ -1,18 +1,17 @@
 package templates
 
 import (
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewTemplates(t *testing.T) {
 	tmpl, err := New("/admin", "test")
 	require.Nil(t, err)
-
 	require.NotNil(t, tmpl)
-
 }
 
 func TestRenderDashboard(t *testing.T) {
@@ -21,49 +20,53 @@ func TestRenderDashboard(t *testing.T) {
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/admin/", nil)
-	data := struct {
-		TotalSecrets  int
-		TotalPolicies int
-		Projects      []struct {
-			Project     string
-			Environment string
-			SecretCount int
-		}
-	}{
-		TotalSecrets:  5,
-		TotalPolicies: 2,
+	data := map[string]any{
+		"TotalSecrets":     5,
+		"TotalGroups":      2,
+		"TotalPolicies":    3,
+		"UnreachableCount": 0,
+		"Roots":            []any{},
 	}
 	tmpl.Render(rr, req, "dashboard.html", data)
 
 	assert.Equal(t, 200, rr.Code)
-
-	body := rr.Body.String()
-	require.NotEqual(t, 0, len(body))
-
+	assert.NotEqual(t, 0, rr.Body.Len())
 }
 
-func TestRenderSecretsList(t *testing.T) {
+func TestRenderSecretsBrowse(t *testing.T) {
 	tmpl, _ := New("/admin", "test")
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/admin/secrets", nil)
-	tmpl.Render(rr, req, "secrets_list.html", map[string]any{
-		"Secrets":     []any{},
-		"Project":     "",
-		"Environment": "",
+	tmpl.Render(rr, req, "secrets_browse.html", map[string]any{
+		"Roots": []any{},
 	})
 	assert.Equal(t, 200, rr.Code)
-
 }
 
-func TestRenderSecretForm(t *testing.T) {
+func TestRenderNodeFormNewSecret(t *testing.T) {
 	tmpl, _ := New("/admin", "test")
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/admin/secrets/new", nil)
-	tmpl.Render(rr, req, "secret_form.html", map[string]any{
-		"IsNew": true,
+	tmpl.Render(rr, req, "node_form.html", map[string]any{
+		"IsNew":    true,
+		"Kind":     "secret",
+		"ParentID": "",
+		"Groups":   []any{},
 	})
 	assert.Equal(t, 200, rr.Code)
+}
 
+func TestRenderNodeFormNewGroup(t *testing.T) {
+	tmpl, _ := New("/admin", "test")
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/admin/secrets/new?kind=group", nil)
+	tmpl.Render(rr, req, "node_form.html", map[string]any{
+		"IsNew":    true,
+		"Kind":     "group",
+		"ParentID": "",
+		"Groups":   []any{},
+	})
+	assert.Equal(t, 200, rr.Code)
 }
 
 func TestRenderPoliciesList(t *testing.T) {
@@ -72,7 +75,6 @@ func TestRenderPoliciesList(t *testing.T) {
 	req := httptest.NewRequest("GET", "/admin/policies", nil)
 	tmpl.Render(rr, req, "policies_list.html", []any{})
 	assert.Equal(t, 200, rr.Code)
-
 }
 
 func TestRenderPolicyForm(t *testing.T) {
@@ -83,5 +85,4 @@ func TestRenderPolicyForm(t *testing.T) {
 		"IsNew": true,
 	})
 	assert.Equal(t, 200, rr.Code)
-
 }
