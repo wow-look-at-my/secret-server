@@ -1,20 +1,10 @@
 services:
   secret-server:
     container_name: secret-server
-    build:
-      context: .
-      dockerfile_inline: |
-        FROM golang:1.24 AS builder
-        WORKDIR /src
-        COPY go.mod go.sum ./
-        RUN go mod download
-        COPY . .
-        RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /secret-server ./cmd/server
-        FROM gcr.io/distroless/static-debian12
-        COPY --from=builder /secret-server /secret-server
-        ENTRYPOINT ["/secret-server"]
+    restart: unless-stopped
+    image: ghcr.io/wow-look-at-my/secret-server:latest
     volumes:
-      - data:/data
+      - ./data:/data
     environment:
       - LISTEN_ADDR=:8080
       - DATABASE_PATH=/data/secrets.db
@@ -23,11 +13,10 @@ services:
       - CF_ACCESS_ADMIN_AUDIENCE=${CF_ACCESS_ADMIN_AUDIENCE}
       - OIDC_AUDIENCE=${OIDC_AUDIENCE}
       - LOG_LEVEL=info
+    labels:
+      - docker-updater.enable=true
     networks:
       - nas-public-network
-
-volumes:
-  data:
 
 networks:
   nas-public-network:
