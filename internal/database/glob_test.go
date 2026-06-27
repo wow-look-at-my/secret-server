@@ -1,33 +1,33 @@
 package database
 
 import (
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
-func TestMatchGlob(t *testing.T) {
-	tests := []struct {
-		pattern string
-		value   string
-		want    bool
-	}{
-		{"*", "anything", true},
-		{"*", "org/repo", true},
-		{"myorg/*", "myorg/repo", true},
-		{"myorg/*", "other/repo", false},
-		{"myorg/specific", "myorg/specific", true},
-		{"myorg/specific", "myorg/other", false},
-		{"refs/heads/main", "refs/heads/main", true},
-		{"refs/heads/main", "refs/heads/dev", false},
-		{"refs/heads/*", "refs/heads/main", true},
-		{"*", "refs/heads/main", true},
+func TestValidatePatternsGood(t *testing.T) {
+	// All of these are syntactically valid GLOB patterns that ValidatePatterns
+	// should accept.
+	cases := [][]string{
+		{"*"},
+		{"org/*"},
+		{"refs/heads/main"},
+		{"refs/tags/v*"},
+		{"[abc]"},
+		{"a[!b]c"},
 	}
-
-	for _, tt := range tests {
-		got, err := matchGlob(tt.pattern, tt.value)
-		assert.Nil(t, err)
-
-		assert.Equal(t, tt.want, got)
-
+	for _, c := range cases {
+		assert.Nil(t, ValidatePatterns(c))
 	}
+	// Nil slice is trivially valid.
+	assert.Nil(t, ValidatePatterns(nil))
+}
+
+func TestValidatePatternsBad(t *testing.T) {
+	// Unclosed character class.
+	assert.NotNil(t, ValidatePatterns([]string{"org/["}))
+	// Empty pattern is rejected — a blank line is almost certainly a typo.
+	assert.NotNil(t, ValidatePatterns([]string{""}))
+	assert.NotNil(t, ValidatePatterns([]string{"  "}))
 }

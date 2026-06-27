@@ -1,17 +1,15 @@
 package handlers
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 	"github.com/wow-look-at-my/secret-server/internal/auth"
 	"github.com/wow-look-at-my/secret-server/internal/database"
 	"github.com/wow-look-at-my/secret-server/internal/templates"
@@ -42,31 +40,33 @@ func NewUIHandler(db *database.DB, audit *database.AuditDB, tmpl *templates.Temp
 func (h *UIHandler) Register(r chi.Router) {
 	p := AdminPrefix
 	r.Get(p+"/", h.dashboard)
-	r.Get(p+"/secrets", h.listSecrets)
-	r.Get(p+"/secrets/new", h.newSecret)
-	r.Get(p+"/secrets/{id}/edit", h.editSecret)
-	r.Post(p+"/secrets", h.createSecret)
-	r.Post(p+"/secrets/{id}", h.updateSecret)
-	r.Post(p+"/secrets/{id}/delete", h.deleteSecretForm)
+
+	// Unified secret-tree browser. Node form handlers live in ui_nodes.go.
+	r.Get(p+"/secrets", h.browseTree)
+	r.Get(p+"/secrets/new", h.newNodeForm)
+	r.Get(p+"/secrets/{id}", h.viewNode)
+	r.Get(p+"/secrets/{id}/edit", h.editNodeForm)
+	r.Post(p+"/secrets", h.createNodeForm)
+	r.Post(p+"/secrets/{id}", h.updateNodeForm)
+	r.Post(p+"/secrets/{id}/delete", h.deleteNodeForm)
+	r.Post(p+"/secrets/{id}/policies/attach", h.attachPolicyForm)
+	r.Post(p+"/secrets/{id}/policies/{policyID}/detach", h.detachPolicyForm)
+
+	// Policies. Handlers live in ui_policies.go.
 	r.Get(p+"/policies", h.listPolicies)
 	r.Get(p+"/policies/new", h.newPolicy)
 	r.Get(p+"/policies/{id}/edit", h.editPolicy)
 	r.Post(p+"/policies", h.createPolicy)
 	r.Post(p+"/policies/{id}", h.updatePolicy)
 	r.Post(p+"/policies/{id}/delete", h.deletePolicyForm)
-	r.Get(p+"/environments", h.listEnvironments)
-	r.Get(p+"/environments/new", h.newEnvironment)
-	r.Get(p+"/environments/{id}/edit", h.editEnvironment)
-	r.Post(p+"/environments", h.createEnvironment)
-	r.Post(p+"/environments/{id}", h.updateEnvironment)
-	r.Post(p+"/environments/{id}/delete", h.deleteEnvironmentForm)
+
 	r.Get(p+"/audit", h.auditLog)
 	r.Get(p+"/style.css", h.tmpl.ServeCSS)
-	// Redirect /admin (no trailing slash) to /admin/
+
 	r.Get(p, func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, p+"/", http.StatusFound)
 	})
-	// Catch-all: redirect unknown /admin/* paths to /admin/
+	// Catch-all: redirect unknown /admin/* paths to /admin/.
 	r.Get(p+"/*", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, p+"/", http.StatusFound)
 	})
@@ -84,33 +84,145 @@ func uiActor(r *http.Request) string {
 	return "unknown"
 }
 
-// resolveEnvID looks up an environment by ID from the form and returns the ID.
-func (h *UIHandler) resolveEnvID(r *http.Request) (string, error) {
-	envID := r.FormValue("env_id")
-	if envID == "" {
-		return "", fmt.Errorf("environment is required")
+// nodeTemplateView is the shape the tree and node templates consume. It is
+// built from the ISecretNode domain types with per-node
+// "HasEffectivePolicies" flags computed via a single downward walk so the
+// templates can flag unreachable nodes without any additional lookups.
+type nodeTemplateView struct {
+	ID                   string
+	Kind                 string // "secret" or "group"
+	Name                 string
+	Value                string
+	HasEffectivePolicies bool
+	Children             []*nodeTemplateView
+	ParentID             *string
+}
+
+// buildTreeView walks a slice of root ISecretNodes and produces a tree of
+// nodeTemplateViews. HasEffectivePolicies on a node is true iff that node
+// or any of its ancestors has a directly-attached policy.
+func buildTreeView(roots []database.ISecretNode, attached map[string]bool) []*nodeTemplateView {
+	var visit func(n database.ISecretNode, ancestorHas bool) *nodeTemplateView
+	visit = func(n database.ISecretNode, ancestorHas bool) *nodeTemplateView {
+		effective := ancestorHas || attached[n.ID()]
+		v := &nodeTemplateView{
+			ID:                   n.ID(),
+			Name:                 n.Name(),
+			HasEffectivePolicies: effective,
+			ParentID:             n.ParentID(),
+		}
+		switch node := n.(type) {
+		case *database.Secret:
+			v.Kind = "secret"
+			v.Value = node.Value
+		case *database.SecretGroup:
+			v.Kind = "group"
+			for _, c := range node.Children() {
+				v.Children = append(v.Children, visit(c, effective))
+			}
+		}
+		return v
 	}
-	if _, err := uuid.Parse(envID); err != nil {
-		return "", fmt.Errorf("invalid environment ID format")
+	out := make([]*nodeTemplateView, 0, len(roots))
+	for _, r := range roots {
+		out = append(out, visit(r, false))
 	}
-	env, err := h.db.GetEnvironment(envID)
+	return out
+}
+
+// collectAttachedNodeIDs returns the set of node IDs that have at least one
+// policy attached directly. For the node counts in a self-hosted server this
+// is a cheap scan — one COUNT() per node. If it ever becomes a bottleneck
+// we can replace it with a single GROUP BY query.
+func (h *UIHandler) collectAttachedNodeIDs(ctx context.Context) (map[string]bool, error) {
+	rows, err := h.db.Q().ListAllNodes(ctx)
 	if err != nil {
-		return "", fmt.Errorf("lookup environment: %w", err)
+		return nil, err
 	}
-	if env == nil {
-		return "", fmt.Errorf("selected environment not found")
+	out := make(map[string]bool, len(rows))
+	for _, r := range rows {
+		cnt, err := h.db.Q().CountAttachedPoliciesForNode(ctx, r.ID)
+		if err != nil {
+			return nil, err
+		}
+		if cnt > 0 {
+			out[r.ID] = true
+		}
 	}
-	return envID, nil
+	return out, nil
+}
+
+// countUnreachableNodes counts the nodes whose effective policy set is empty
+// (no attachments on this node or any ancestor). Used by the dashboard.
+func countUnreachableNodes(views []*nodeTemplateView) int {
+	total := 0
+	var walk func(*nodeTemplateView)
+	walk = func(v *nodeTemplateView) {
+		if !v.HasEffectivePolicies {
+			total++
+		}
+		for _, c := range v.Children {
+			walk(c)
+		}
+	}
+	for _, v := range views {
+		walk(v)
+	}
+	return total
+}
+
+// countNodeKinds counts groups and secrets in the full tree. Used by the
+// dashboard stats cards.
+func countNodeKinds(views []*nodeTemplateView) (groups, secrets int) {
+	var walk func(*nodeTemplateView)
+	walk = func(v *nodeTemplateView) {
+		if v.Kind == "group" {
+			groups++
+		} else {
+			secrets++
+		}
+		for _, c := range v.Children {
+			walk(c)
+		}
+	}
+	for _, v := range views {
+		walk(v)
+	}
+	return groups, secrets
 }
 
 func (h *UIHandler) dashboard(w http.ResponseWriter, r *http.Request) {
-	stats, err := h.db.GetDashboardStats()
+	ctx := r.Context()
+	roots, err := h.db.LoadSubtree(nil)
 	if err != nil {
-		slog.Error("dashboard stats failed", "error", err)
+		slog.Error("dashboard load failed", "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	h.tmpl.Render(w, r, "dashboard.html", stats)
+	attached, err := h.collectAttachedNodeIDs(ctx)
+	if err != nil {
+		slog.Error("collect attached nodes failed", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	views := buildTreeView(roots, attached)
+	groups, secrets := countNodeKinds(views)
+	unreachable := countUnreachableNodes(views)
+
+	policyCount, err := h.db.Q().CountPolicies(ctx)
+	if err != nil {
+		slog.Error("count policies failed", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	h.tmpl.Render(w, r, "dashboard.html", map[string]any{
+		"TotalGroups":      groups,
+		"TotalSecrets":     secrets,
+		"TotalPolicies":    policyCount,
+		"UnreachableCount": unreachable,
+		"Roots":            views,
+	})
 }
 
 // base64JSONDecode tries to base64-decode a value and parse it as JSON.
@@ -119,7 +231,6 @@ func (h *UIHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 func base64JSONDecode(value string) string {
 	decoded, err := base64.StdEncoding.DecodeString(value)
 	if err != nil {
-		// Try URL-safe base64 as well.
 		decoded, err = base64.URLEncoding.DecodeString(value)
 		if err != nil {
 			return ""
@@ -136,562 +247,166 @@ func base64JSONDecode(value string) string {
 	return string(out)
 }
 
-// --- Secrets ---
+// --- Node tree browsing ---
 
-func (h *UIHandler) listSecrets(w http.ResponseWriter, r *http.Request) {
-	project := r.URL.Query().Get("project")
-	environment := r.URL.Query().Get("environment")
-	secrets, err := h.db.ListSecrets(project, environment)
+func (h *UIHandler) browseTree(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	roots, err := h.db.LoadSubtree(nil)
 	if err != nil {
-		slog.Error("list secrets failed", "error", err)
+		slog.Error("browse tree failed", "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	envs, _ := h.db.ListEnvironments()
-	// Build unique project names and environment names for filter dropdowns.
-	projectSet := make(map[string]bool)
-	envNameSet := make(map[string]bool)
-	for _, e := range envs {
-		projectSet[e.Project] = true
-		envNameSet[e.Environment] = true
+	attached, err := h.collectAttachedNodeIDs(ctx)
+	if err != nil {
+		slog.Error("collect attached nodes failed", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
 	}
-	var uniqueProjects, uniqueEnvNames []string
-	for _, e := range envs {
-		if projectSet[e.Project] {
-			uniqueProjects = append(uniqueProjects, e.Project)
-			delete(projectSet, e.Project)
-		}
-		if envNameSet[e.Environment] {
-			uniqueEnvNames = append(uniqueEnvNames, e.Environment)
-			delete(envNameSet, e.Environment)
-		}
-	}
-	h.tmpl.Render(w, r, "secrets_list.html", map[string]any{
-		"Secrets":        secrets,
-		"Project":        project,
-		"Environment":    environment,
-		"Environments":   envs,
-		"UniqueProjects": uniqueProjects,
-		"UniqueEnvNames": uniqueEnvNames,
+	views := buildTreeView(roots, attached)
+	h.tmpl.Render(w, r, "secrets_browse.html", map[string]any{
+		"Roots": views,
 	})
 }
 
-func (h *UIHandler) newSecret(w http.ResponseWriter, r *http.Request) {
-	envs, _ := h.db.ListEnvironments()
-	h.tmpl.Render(w, r, "secret_form.html", map[string]any{
-		"IsNew":        true,
-		"Environments": envs,
-	})
-}
-
-func (h *UIHandler) editSecret(w http.ResponseWriter, r *http.Request) {
+// viewNode shows a single node: its breadcrumb, its direct children (if a
+// group), and its attached policies with an attach-policy form for any
+// unattached policies.
+func (h *UIHandler) viewNode(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	id := chi.URLParam(r, "id")
-	secret, err := h.db.GetSecret(id)
-	if err != nil {
-		slog.Error("get secret failed", "error", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-	if secret == nil {
+	if !validUUID(id) {
 		http.NotFound(w, r)
 		return
 	}
-	envs, _ := h.db.ListEnvironments()
-	data := map[string]any{
-		"IsNew":        false,
-		"Secret":       secret,
-		"Environments": envs,
-	}
-	if structure := base64JSONDecode(secret.Value); structure != "" {
-		data["JSONStructure"] = structure
-	}
-	h.tmpl.Render(w, r, "secret_form.html", data)
-}
-
-func (h *UIHandler) createSecret(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Bad Request", http.StatusBadRequest)
-		return
-	}
-	envID, err := h.resolveEnvID(r)
+	node, err := h.db.GetNode(id)
 	if err != nil {
-		envs, _ := h.db.ListEnvironments()
-		h.tmpl.Render(w, r, "secret_form.html", map[string]any{
-			"IsNew":        true,
-			"Error":        "Invalid environment: " + err.Error(),
-			"Form":         r.Form,
-			"Environments": envs,
-		})
-		return
-	}
-	secret, err := h.db.CreateSecret(
-		r.FormValue("key"),
-		r.FormValue("value"),
-		envID,
-	)
-	if err != nil {
-		slog.Error("create secret failed", "error", err)
-		envs, _ := h.db.ListEnvironments()
-		h.tmpl.Render(w, r, "secret_form.html", map[string]any{
-			"IsNew":        true,
-			"Error":        "Failed to create secret. Check server logs for details.",
-			"Form":         r.Form,
-			"Environments": envs,
-		})
-		return
-	}
-
-	env, _ := h.db.GetEnvironment(envID)
-	project, environment := "", ""
-	if env != nil {
-		project, environment = env.Project, env.Environment
-	}
-	details, _ := json.Marshal(map[string]string{"key": r.FormValue("key"), "project": project, "environment": environment})
-	if err := h.audit.CreateEntry("secret.create", "admin", uiActor(r), "secret", secret.ID, string(details)); err != nil {
-		slog.Error("audit log failed", "error", err)
-	}
-
-	http.Redirect(w, r, AdminPrefix+"/secrets", http.StatusSeeOther)
-}
-
-func (h *UIHandler) updateSecret(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
-	id := chi.URLParam(r, "id")
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Bad Request", http.StatusBadRequest)
-		return
-	}
-	value := r.FormValue("value")
-	if value == "" {
-		existing, err := h.db.GetSecret(id)
-		if err != nil {
-			slog.Error("get secret for update failed", "error", err)
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-			return
-		}
-		if existing == nil {
-			http.NotFound(w, r)
-			return
-		}
-		value = existing.Value
-	}
-	envID, err := h.resolveEnvID(r)
-	if err != nil {
-		slog.Error("resolve env for secret update failed", "error", err)
+		slog.Error("get node failed", "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	err = h.db.UpdateSecret(id, r.FormValue("key"), value, envID)
+	if node == nil {
+		http.NotFound(w, r)
+		return
+	}
+	sub, err := h.db.LoadSubtree(&id)
 	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
-			http.NotFound(w, r)
-			return
-		}
-		slog.Error("update secret failed", "error", err)
+		slog.Error("load subtree failed", "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-
-	env, _ := h.db.GetEnvironment(envID)
-	project, environment := "", ""
-	if env != nil {
-		project, environment = env.Project, env.Environment
-	}
-	details, _ := json.Marshal(map[string]string{"key": r.FormValue("key"), "project": project, "environment": environment})
-	if err := h.audit.CreateEntry("secret.update", "admin", uiActor(r), "secret", id, string(details)); err != nil {
-		slog.Error("audit log failed", "error", err)
-	}
-
-	http.Redirect(w, r, AdminPrefix+"/secrets", http.StatusSeeOther)
-}
-
-func (h *UIHandler) deleteSecretForm(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	if err := h.db.DeleteSecret(id); err != nil {
-		if errors.Is(err, database.ErrNotFound) {
-			http.NotFound(w, r)
-			return
-		}
-		slog.Error("delete secret failed", "error", err)
+	attached, err := h.collectAttachedNodeIDs(ctx)
+	if err != nil {
+		slog.Error("collect attached nodes failed", "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-
-	if err := h.audit.CreateEntry("secret.delete", "admin", uiActor(r), "secret", id, "{}"); err != nil {
-		slog.Error("audit log failed", "error", err)
+	// Compute ancestor-has-policies by walking up from this node.
+	ancestorHas, err := h.anyAncestorHasPolicy(ctx, node.ParentID(), attached)
+	if err != nil {
+		slog.Error("ancestor walk failed", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	views := buildTreeView(sub, attached)
+	if ancestorHas {
+		for _, v := range views {
+			markEffective(v)
+		}
 	}
 
-	http.Redirect(w, r, AdminPrefix+"/secrets", http.StatusSeeOther)
-}
-
-// --- Policies ---
-
-func (h *UIHandler) listPolicies(w http.ResponseWriter, r *http.Request) {
-	policies, err := h.db.ListPolicies()
+	policies, err := h.db.ListNodePolicies(id)
+	if err != nil {
+		slog.Error("list node policies failed", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	allPolicies, err := h.db.ListPolicies()
 	if err != nil {
 		slog.Error("list policies failed", "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	h.tmpl.Render(w, r, "policies_list.html", policies)
-}
-
-func (h *UIHandler) newPolicy(w http.ResponseWriter, r *http.Request) {
-	envs, _ := h.db.ListEnvironments()
-	h.tmpl.Render(w, r, "policy_form.html", map[string]any{
-		"IsNew":        true,
-		"Environments": envs,
-	})
-}
-
-func (h *UIHandler) editPolicy(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	policy, err := h.db.GetPolicy(id)
-	if err != nil {
-		slog.Error("get policy failed", "error", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
+	attachedIDs := make(map[string]bool, len(policies))
+	for _, p := range policies {
+		attachedIDs[p.ID] = true
 	}
-	if policy == nil {
-		http.NotFound(w, r)
-		return
-	}
-	envs, _ := h.db.ListEnvironments()
-	h.tmpl.Render(w, r, "policy_form.html", map[string]any{
-		"IsNew":        false,
-		"Policy":       policy,
-		"Environments": envs,
-	})
-}
-
-// parsePolicyPatternsForm extracts and validates the three pattern lists
-// from an access-policy form submission. An empty ref/actor list defaults
-// to ["*"] so empty-field semantics match the legacy behavior.
-func parsePolicyPatternsForm(r *http.Request) (repo, ref, actor []string, err error) {
-	repo = parsePatternLines(r.FormValue("repository_patterns"))
-	ref = parsePatternLines(r.FormValue("ref_patterns"))
-	actor = parsePatternLines(r.FormValue("actor_patterns"))
-	if len(repo) == 0 {
-		return nil, nil, nil, fmt.Errorf("at least one repository pattern is required")
-	}
-	if len(ref) == 0 {
-		ref = []string{"*"}
-	}
-	if len(actor) == 0 {
-		actor = []string{"*"}
-	}
-	for _, list := range [][]string{repo, ref, actor} {
-		if err := database.ValidatePatterns(list); err != nil {
-			return nil, nil, nil, err
+	var available []database.Policy
+	for _, p := range allPolicies {
+		if !attachedIDs[p.ID] {
+			available = append(available, p)
 		}
 	}
-	return repo, ref, actor, nil
-}
 
-func (h *UIHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Bad Request", http.StatusBadRequest)
-		return
-	}
-	repoPatterns, refPatterns, actorPatterns, err := parsePolicyPatternsForm(r)
+	crumbs, err := h.buildBreadcrumbs(ctx, node)
 	if err != nil {
-		envs, _ := h.db.ListEnvironments()
-		h.tmpl.Render(w, r, "policy_form.html", map[string]any{
-			"IsNew":        true,
-			"Error":        err.Error(),
-			"Form":         r.Form,
-			"Environments": envs,
-		})
-		return
-	}
-	envID, err := h.resolveEnvID(r)
-	if err != nil {
-		envs, _ := h.db.ListEnvironments()
-		h.tmpl.Render(w, r, "policy_form.html", map[string]any{
-			"IsNew":        true,
-			"Error":        "Invalid environment: " + err.Error(),
-			"Form":         r.Form,
-			"Environments": envs,
-		})
-		return
-	}
-	policy, err := h.db.CreatePolicy(
-		r.FormValue("name"),
-		repoPatterns,
-		refPatterns,
-		actorPatterns,
-		envID,
-	)
-	if err != nil {
-		slog.Error("create policy failed", "error", err)
-		envs, _ := h.db.ListEnvironments()
-		h.tmpl.Render(w, r, "policy_form.html", map[string]any{
-			"IsNew":        true,
-			"Error":        "Failed to create policy. Check server logs for details.",
-			"Form":         r.Form,
-			"Environments": envs,
-		})
-		return
-	}
-
-	env, _ := h.db.GetEnvironment(envID)
-	project, environment := "", ""
-	if env != nil {
-		project, environment = env.Project, env.Environment
-	}
-	details, _ := json.Marshal(map[string]any{
-		"name":                r.FormValue("name"),
-		"repository_patterns": repoPatterns,
-		"ref_patterns":        refPatterns,
-		"actor_patterns":      actorPatterns,
-		"project":             project,
-		"environment":         environment,
-	})
-	if err := h.audit.CreateEntry("policy.create", "admin", uiActor(r), "policy", policy.ID, string(details)); err != nil {
-		slog.Error("audit log failed", "error", err)
-	}
-
-	http.Redirect(w, r, AdminPrefix+"/policies", http.StatusSeeOther)
-}
-
-func (h *UIHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
-	id := chi.URLParam(r, "id")
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Bad Request", http.StatusBadRequest)
-		return
-	}
-	repoPatterns, refPatterns, actorPatterns, err := parsePolicyPatternsForm(r)
-	if err != nil {
-		existing, _ := h.db.GetPolicy(id)
-		envs, _ := h.db.ListEnvironments()
-		h.tmpl.Render(w, r, "policy_form.html", map[string]any{
-			"IsNew":        false,
-			"Policy":       existing,
-			"Error":        err.Error(),
-			"Form":         r.Form,
-			"Environments": envs,
-		})
-		return
-	}
-	envID, err := h.resolveEnvID(r)
-	if err != nil {
-		slog.Error("resolve env for policy update failed", "error", err)
+		slog.Error("build breadcrumbs failed", "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	err = h.db.UpdatePolicy(id, r.FormValue("name"), repoPatterns, refPatterns, actorPatterns, envID)
-	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
-			http.NotFound(w, r)
-			return
+
+	h.tmpl.Render(w, r, "node_view.html", map[string]any{
+		"Node":              views[0],
+		"AttachedPolicies":  policies,
+		"AvailablePolicies": available,
+		"Breadcrumbs":       crumbs,
+	})
+}
+
+// anyAncestorHasPolicy walks up the parent chain from parentID looking for
+// any ancestor with an attached policy.
+func (h *UIHandler) anyAncestorHasPolicy(ctx context.Context, parentID *string, attached map[string]bool) (bool, error) {
+	for parentID != nil {
+		if attached[*parentID] {
+			return true, nil
 		}
-		slog.Error("update policy failed", "error", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	env, _ := h.db.GetEnvironment(envID)
-	project, environment := "", ""
-	if env != nil {
-		project, environment = env.Project, env.Environment
-	}
-	details, _ := json.Marshal(map[string]any{
-		"name":                r.FormValue("name"),
-		"repository_patterns": repoPatterns,
-		"ref_patterns":        refPatterns,
-		"actor_patterns":      actorPatterns,
-		"project":             project,
-		"environment":         environment,
-	})
-	if err := h.audit.CreateEntry("policy.update", "admin", uiActor(r), "policy", id, string(details)); err != nil {
-		slog.Error("audit log failed", "error", err)
-	}
-
-	http.Redirect(w, r, AdminPrefix+"/policies", http.StatusSeeOther)
-}
-
-func (h *UIHandler) deletePolicyForm(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	if err := h.db.DeletePolicy(id); err != nil {
-		if errors.Is(err, database.ErrNotFound) {
-			http.NotFound(w, r)
-			return
+		row, err := h.db.Q().GetSecretNode(ctx, *parentID)
+		if err != nil {
+			return false, err
 		}
-		slog.Error("delete policy failed", "error", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	if err := h.audit.CreateEntry("policy.delete", "admin", uiActor(r), "policy", id, "{}"); err != nil {
-		slog.Error("audit log failed", "error", err)
-	}
-
-	http.Redirect(w, r, AdminPrefix+"/policies", http.StatusSeeOther)
-}
-
-// --- Environments ---
-
-func (h *UIHandler) listEnvironments(w http.ResponseWriter, r *http.Request) {
-	envs, err := h.db.ListEnvironments()
-	if err != nil {
-		slog.Error("list environments failed", "error", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-	h.tmpl.Render(w, r, "environments_list.html", map[string]any{
-		"Environments": envs,
-	})
-}
-
-func (h *UIHandler) newEnvironment(w http.ResponseWriter, r *http.Request) {
-	h.tmpl.Render(w, r, "environment_form.html", map[string]any{
-		"IsNew": true,
-	})
-}
-
-func (h *UIHandler) editEnvironment(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	env, err := h.db.GetEnvironment(id)
-	if err != nil {
-		slog.Error("get environment failed", "error", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-	if env == nil {
-		http.NotFound(w, r)
-		return
-	}
-	h.tmpl.Render(w, r, "environment_form.html", map[string]any{
-		"IsNew":       false,
-		"Environment": env,
-	})
-}
-
-func (h *UIHandler) createEnvironment(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Bad Request", http.StatusBadRequest)
-		return
-	}
-	project := r.FormValue("project")
-	environment := r.FormValue("environment")
-	if project == "" || environment == "" {
-		h.tmpl.Render(w, r, "environment_form.html", map[string]any{
-			"IsNew": true,
-			"Error": "Project and environment are required.",
-			"Form":  r.Form,
-		})
-		return
-	}
-	env, err := h.db.CreateEnvironment(project, environment)
-	if err != nil {
-		slog.Error("create environment failed", "error", err)
-		h.tmpl.Render(w, r, "environment_form.html", map[string]any{
-			"IsNew": true,
-			"Error": "Failed to create environment. Check server logs for details.",
-			"Form":  r.Form,
-		})
-		return
-	}
-
-	details, _ := json.Marshal(map[string]string{"project": project, "environment": environment})
-	if err := h.audit.CreateEntry("environment.create", "admin", uiActor(r), "environment", env.ID, string(details)); err != nil {
-		slog.Error("audit log failed", "error", err)
-	}
-
-	http.Redirect(w, r, AdminPrefix+"/environments", http.StatusSeeOther)
-}
-
-func (h *UIHandler) updateEnvironment(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
-	id := chi.URLParam(r, "id")
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Bad Request", http.StatusBadRequest)
-		return
-	}
-	project := r.FormValue("project")
-	environment := r.FormValue("environment")
-	if project == "" || environment == "" {
-		env, _ := h.db.GetEnvironment(id)
-		h.tmpl.Render(w, r, "environment_form.html", map[string]any{
-			"IsNew":       false,
-			"Environment": env,
-			"Error":       "Project and environment are required.",
-			"Form":        r.Form,
-		})
-		return
-	}
-	if err := h.db.UpdateEnvironment(id, project, environment); err != nil {
-		if errors.Is(err, database.ErrNotFound) {
-			http.NotFound(w, r)
-			return
+		if row.ParentID.Valid {
+			s := row.ParentID.String
+			parentID = &s
+		} else {
+			parentID = nil
 		}
-		slog.Error("update environment failed", "error", err)
-		env, _ := h.db.GetEnvironment(id)
-		h.tmpl.Render(w, r, "environment_form.html", map[string]any{
-			"IsNew":       false,
-			"Environment": env,
-			"Error":       "Failed to update environment. Check server logs for details.",
-			"Form":        r.Form,
-		})
-		return
 	}
-
-	details, _ := json.Marshal(map[string]string{"project": project, "environment": environment})
-	if err := h.audit.CreateEntry("environment.update", "admin", uiActor(r), "environment", id, string(details)); err != nil {
-		slog.Error("audit log failed", "error", err)
-	}
-
-	http.Redirect(w, r, AdminPrefix+"/environments", http.StatusSeeOther)
+	return false, nil
 }
 
-func (h *UIHandler) deleteEnvironmentForm(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	env, err := h.db.GetEnvironment(id)
-	if err != nil {
-		slog.Error("get environment for delete failed", "error", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
+// markEffective sets HasEffectivePolicies on the given view and all its
+// descendants (used when an ancestor outside this subtree has a policy).
+func markEffective(v *nodeTemplateView) {
+	v.HasEffectivePolicies = true
+	for _, c := range v.Children {
+		markEffective(c)
 	}
-	if env == nil {
-		http.NotFound(w, r)
-		return
-	}
+}
 
-	inUse, err := h.db.EnvironmentInUse(id)
-	if err != nil {
-		slog.Error("check environment in use failed", "error", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-	if inUse {
-		envs, _ := h.db.ListEnvironments()
-		h.tmpl.Render(w, r, "environments_list.html", map[string]any{
-			"Environments": envs,
-			"Error":        fmt.Sprintf("Cannot delete %s / %s: secrets or policies still reference it. Remove them first.", env.Project, env.Environment),
-		})
-		return
-	}
-
-	if err := h.db.DeleteEnvironment(id); err != nil {
-		if errors.Is(err, database.ErrNotFound) {
-			http.NotFound(w, r)
-			return
+// buildBreadcrumbs walks up from a node to the root, returning a slice of
+// views ordered root-first.
+func (h *UIHandler) buildBreadcrumbs(ctx context.Context, node database.ISecretNode) ([]*nodeTemplateView, error) {
+	var crumbs []*nodeTemplateView
+	parentID := node.ParentID()
+	for parentID != nil {
+		row, err := h.db.Q().GetSecretNode(ctx, *parentID)
+		if err != nil {
+			return nil, err
 		}
-		slog.Error("delete environment failed", "error", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
+		v := &nodeTemplateView{
+			ID:   row.ID,
+			Name: row.Name,
+			Kind: row.Kind,
+		}
+		crumbs = append([]*nodeTemplateView{v}, crumbs...)
+		if row.ParentID.Valid {
+			s := row.ParentID.String
+			parentID = &s
+		} else {
+			parentID = nil
+		}
 	}
-
-	details, _ := json.Marshal(map[string]string{"project": env.Project, "environment": env.Environment})
-	if err := h.audit.CreateEntry("environment.delete", "admin", uiActor(r), "environment", id, string(details)); err != nil {
-		slog.Error("audit log failed", "error", err)
-	}
-
-	http.Redirect(w, r, AdminPrefix+"/environments", http.StatusSeeOther)
+	return crumbs, nil
 }
 
 // --- Audit ---
