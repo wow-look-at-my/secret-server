@@ -2,31 +2,55 @@ package database
 
 import (
 	"fmt"
-	"path"
+	"strings"
 )
 
-// matchGlob matches a pattern against a value using path.Match semantics.
-// The pattern can use * to match any sequence within a path segment,
-// and ** is handled by splitting on / and matching segments.
-func matchGlob(pattern, value string) (bool, error) {
-	// path.Match doesn't handle ** for multi-segment matching,
-	// but for our use cases (repo patterns like "org/*" and ref patterns
-	// like "refs/heads/main"), simple path.Match is sufficient.
-	// A pattern of "*" matches anything without a /.
-	// For a "match everything" pattern, we treat "*" specially.
-	if pattern == "*" {
-		return true, nil
-	}
-	return path.Match(pattern, value)
-}
-
-// ValidatePatterns returns a non-nil error if any pattern in the slice
-// is syntactically invalid under path.Match.
+// ValidatePatterns returns a non-nil error if any pattern in the slice is
+// syntactically invalid as a SQLite GLOB pattern. GLOB is forgiving: any
+// sequence of characters is technically a valid pattern, but unterminated
+// character classes (`[...`) are a write-time bug we can catch here.
+//
+// Glob-matching itself lives inside SQLite (used via the GLOB operator in
+// internal/database/policies.go MatchingPolicyIDs) — there is no Go-side
+// matcher to keep in sync.
 func ValidatePatterns(patterns []string) error {
 	for _, p := range patterns {
-		if _, err := path.Match(p, ""); err != nil {
+		if err := validateGlob(p); err != nil {
 			return fmt.Errorf("invalid glob pattern %q: %w", p, err)
 		}
+	}
+	return nil
+}
+
+func validateGlob(p string) error {
+	// Walk the pattern looking for an unclosed `[...` character class.
+	// Backslashes escape the following character inside a class.
+	inClass := false
+	i := 0
+	for i < len(p) {
+		c := p[i]
+		switch {
+		case !inClass && c == '[':
+			inClass = true
+			i++
+			// First character after `[` may be `]` (literal).
+			if i < len(p) && p[i] == ']' {
+				i++
+			}
+		case inClass && c == ']':
+			inClass = false
+			i++
+		case inClass && c == '\\' && i+1 < len(p):
+			i += 2
+		default:
+			i++
+		}
+	}
+	if inClass {
+		return fmt.Errorf("unclosed character class")
+	}
+	if strings.TrimSpace(p) == "" {
+		return fmt.Errorf("pattern is empty or whitespace-only")
 	}
 	return nil
 }

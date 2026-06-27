@@ -4,6 +4,7 @@ on:
   push:
 
 permissions:
+  actions: read
   contents: read
   id-token: write
 

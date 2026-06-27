@@ -6,12 +6,12 @@ import (
 	"os"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/wow-look-at-my/secret-server/internal/config"
-	"github.com/wow-look-at-my/secret-server/internal/handlers"
 	"github.com/wow-look-at-my/secret-server/internal/crypto"
 	"github.com/wow-look-at-my/secret-server/internal/database"
-	"github.com/wow-look-at-my/testify/assert"
-	"github.com/wow-look-at-my/testify/require"
+	"github.com/wow-look-at-my/secret-server/internal/handlers"
 )
 
 func testDB(t *testing.T) (*database.DB, *database.AuditDB) {
@@ -41,9 +41,9 @@ func testDB(t *testing.T) (*database.DB, *database.AuditDB) {
 func TestBuildMux(t *testing.T) {
 	db, auditDB := testDB(t)
 	cfg := &config.Config{
-		ListenAddr:         ":0",
-		CFAccessTeamDomain: "team",
-		CFAccessAdminAudience:   "aud",
+		ListenAddr:            ":0",
+		CFAccessTeamDomain:    "team",
+		CFAccessAdminAudience: "aud",
 	}
 	mux, err := buildMux(db, auditDB, cfg)
 	require.Nil(t, err)
@@ -53,8 +53,8 @@ func TestBuildMux(t *testing.T) {
 func TestHealthEndpoint(t *testing.T) {
 	db, auditDB := testDB(t)
 	cfg := &config.Config{
-		CFAccessTeamDomain: "team",
-		CFAccessAdminAudience:   "aud",
+		CFAccessTeamDomain:    "team",
+		CFAccessAdminAudience: "aud",
 	}
 	mux, err := buildMux(db, auditDB, cfg)
 	require.Nil(t, err)
@@ -70,8 +70,8 @@ func TestHealthEndpoint(t *testing.T) {
 func TestRootRedirect(t *testing.T) {
 	db, auditDB := testDB(t)
 	cfg := &config.Config{
-		CFAccessTeamDomain: "team",
-		CFAccessAdminAudience:   "aud",
+		CFAccessTeamDomain:    "team",
+		CFAccessAdminAudience: "aud",
 	}
 	mux, err := buildMux(db, auditDB, cfg)
 	require.Nil(t, err)
@@ -87,8 +87,8 @@ func TestRootRedirect(t *testing.T) {
 func TestRootNotFoundForOtherPaths(t *testing.T) {
 	db, auditDB := testDB(t)
 	cfg := &config.Config{
-		CFAccessTeamDomain: "team",
-		CFAccessAdminAudience:   "aud",
+		CFAccessTeamDomain:    "team",
+		CFAccessAdminAudience: "aud",
 	}
 	mux, err := buildMux(db, auditDB, cfg)
 	require.Nil(t, err)
@@ -103,14 +103,14 @@ func TestRootNotFoundForOtherPaths(t *testing.T) {
 func TestAdminRequiresCFAccess(t *testing.T) {
 	db, auditDB := testDB(t)
 	cfg := &config.Config{
-		CFAccessTeamDomain: "team",
-		CFAccessAdminAudience:   "aud",
+		CFAccessTeamDomain:    "team",
+		CFAccessAdminAudience: "aud",
 	}
 	mux, err := buildMux(db, auditDB, cfg)
 	require.Nil(t, err)
 
 	// Admin endpoint without CF Access token should be unauthorized
-	req := httptest.NewRequest("POST", handlers.AdminPrefix+"/v1/secrets", nil)
+	req := httptest.NewRequest("POST", handlers.AdminPrefix+"/v1/nodes", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
@@ -120,8 +120,8 @@ func TestAdminRequiresCFAccess(t *testing.T) {
 func TestUIRequiresCFAccess(t *testing.T) {
 	db, auditDB := testDB(t)
 	cfg := &config.Config{
-		CFAccessTeamDomain: "team",
-		CFAccessAdminAudience:   "aud",
+		CFAccessTeamDomain:    "team",
+		CFAccessAdminAudience: "aud",
 	}
 	mux, err := buildMux(db, auditDB, cfg)
 	require.Nil(t, err)
@@ -136,8 +136,8 @@ func TestUIRequiresCFAccess(t *testing.T) {
 func TestPublicAPINoAuth(t *testing.T) {
 	db, auditDB := testDB(t)
 	cfg := &config.Config{
-		CFAccessTeamDomain: "team",
-		CFAccessAdminAudience:   "aud",
+		CFAccessTeamDomain:    "team",
+		CFAccessAdminAudience: "aud",
 	}
 	mux, err := buildMux(db, auditDB, cfg)
 	require.Nil(t, err)

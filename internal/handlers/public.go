@@ -36,8 +36,13 @@ func (h *PublicHandler) logAccessDenied(actorType, actorID, reason string, extra
 	}
 }
 
+// fetchSecrets is the hot path for GitHub Actions. It validates an OIDC
+// token, matches the claims against policy pattern rows via a single
+// SQLite-side GLOB query, then resolves the matching policy IDs to
+// authorized leaf secrets through a recursive CTE. The response shape
+// is `{secret_name: plaintext}` — secret names are globally unique so
+// there is no collision to handle.
 func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
-	// Limit request body to prevent abuse (this is a GET endpoint but limit anyway).
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 
 	authHeader := r.Header.Get("Authorization")
@@ -68,7 +73,7 @@ func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
 		"workflow", claims.Workflow,
 	)
 
-	policies, err := h.db.MatchingPolicies(claims.Repository, claims.Ref, claims.Actor)
+	policyIDs, err := h.db.MatchingPolicyIDs(r.Context(), claims.Repository, claims.Ref, claims.Actor)
 	if err != nil {
 		slog.Error("failed to match policies", "error", err)
 		h.logAccessDenied("github_actions", claims.Repository, "policy_lookup_error", map[string]any{
@@ -82,7 +87,7 @@ func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(policies) == 0 {
+	if len(policyIDs) == 0 {
 		slog.Info("no matching policies",
 			"repository", claims.Repository,
 			"ref", claims.Ref,
@@ -98,51 +103,32 @@ func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Collect secrets from all matching policies (deduplicate by environment ID)
-	result := make(map[string]string)
-	seen := make(map[string]bool)
-	for _, p := range policies {
-		if seen[p.EnvironmentID] {
-			continue
-		}
-		seen[p.EnvironmentID] = true
-
-		secrets, err := h.db.GetSecretsByEnvironmentID(p.EnvironmentID)
-		if err != nil {
-			slog.Error("failed to get secrets", "project", p.Project, "environment", p.Environment, "error", err)
-			h.logAccessDenied("github_actions", claims.Repository, "secret_retrieval_error", map[string]any{
-				"repository":  claims.Repository,
-				"ref":         claims.Ref,
-				"actor":       claims.Actor,
-				"workflow":    claims.Workflow,
-				"project":     p.Project,
-				"environment": p.Environment,
-				"error":       err.Error(),
-			})
-			http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
-			return
-		}
-		for k, v := range secrets {
-			result[k] = v
-		}
+	secrets, err := h.db.AuthorizedSecrets(r.Context(), policyIDs)
+	if err != nil {
+		slog.Error("failed to load authorized secrets", "error", err)
+		h.logAccessDenied("github_actions", claims.Repository, "secret_retrieval_error", map[string]any{
+			"repository": claims.Repository,
+			"ref":        claims.Ref,
+			"actor":      claims.Actor,
+			"workflow":   claims.Workflow,
+			"error":      err.Error(),
+		})
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
 	}
 
-	policyIDs := make([]string, len(policies))
-	for i, p := range policies {
-		policyIDs[i] = p.ID
-	}
 	details, _ := json.Marshal(map[string]any{
 		"repository":    claims.Repository,
 		"ref":           claims.Ref,
 		"actor":         claims.Actor,
 		"workflow":      claims.Workflow,
 		"policies":      policyIDs,
-		"secrets_count": len(result),
+		"secrets_count": len(secrets),
 	})
-	if err := h.audit.CreateEntry("secret.access", "github_actions", claims.Repository, "secret", "", string(details)); err != nil {
+	if err := h.audit.CreateEntry("secret.access.granted", "github_actions", claims.Repository, "secret", "", string(details)); err != nil {
 		slog.Error("audit log failed", "error", err)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	json.NewEncoder(w).Encode(secrets)
 }

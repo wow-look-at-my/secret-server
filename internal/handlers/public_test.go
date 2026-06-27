@@ -8,9 +8,23 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/wow-look-at-my/testify/assert"
-	"github.com/wow-look-at-my/testify/require"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+// attachPolicyTo is a small helper that creates a secret + policy and
+// attaches them, returning the policy ID. Each test needs this shape so
+// the inherited-downward walk actually finds anything.
+func attachPolicyTo(t *testing.T, env *testEnv, secretName, value string, parentID *string,
+	policyName string, repo, ref, actor []string) (secretID, policyID string) {
+	t.Helper()
+	s, err := env.db.CreateSecret(parentID, secretName, value)
+	require.Nil(t, err)
+	p, err := env.db.CreatePolicy(policyName, repo, ref, actor)
+	require.Nil(t, err)
+	require.Nil(t, env.db.AttachPolicy(s.ID(), p.ID))
+	return s.ID(), p.ID
+}
 
 func TestPublicFetchSecretsNoToken(t *testing.T) {
 	env := setup(t)
@@ -35,10 +49,8 @@ func TestPublicFetchSecretsNoToken(t *testing.T) {
 
 func TestPublicFetchSecretsWithPolicy(t *testing.T) {
 	env := setup(t)
-
-	envID := env.envID(t, "myapp", "prod")
-	env.db.CreateSecret("DB_URL", "postgres://localhost", envID)
-	env.db.CreatePolicy("allow", []string{"myorg/*"}, []string{"*"}, []string{"*"}, envID)
+	attachPolicyTo(t, env, "DB_URL", "postgres://localhost", nil,
+		"allow", []string{"myorg/*"}, []string{"*"}, []string{"*"})
 
 	h := NewPublicHandler(env.db, env.audit, env.oidc)
 	mux := chi.NewRouter()
@@ -54,23 +66,20 @@ func TestPublicFetchSecretsWithPolicy(t *testing.T) {
 
 	var result map[string]string
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &result))
-
 	assert.Equal(t, "postgres://localhost", result["DB_URL"])
 
-	// Verify audit entry for secret access
 	entries, err := env.audit.ListEntries(10, 0)
 	require.Nil(t, err)
 	require.Equal(t, 1, len(entries))
-	assert.Equal(t, "secret.access", entries[0].Action)
+	assert.Equal(t, "secret.access.granted", entries[0].Action)
 	assert.Equal(t, "github_actions", entries[0].ActorType)
 	assert.Equal(t, "myorg/repo", entries[0].ActorID)
 }
 
 func TestPublicFetchSecretsNoMatchingPolicy(t *testing.T) {
 	env := setup(t)
-	envID := env.envID(t, "app", "prod")
-	env.db.CreateSecret("KEY", "val", envID)
-	env.db.CreatePolicy("other", []string{"otherorg/*"}, []string{"*"}, []string{"*"}, envID)
+	attachPolicyTo(t, env, "KEY", "val", nil,
+		"other", []string{"otherorg/*"}, []string{"*"}, []string{"*"})
 
 	h := NewPublicHandler(env.db, env.audit, env.oidc)
 	mux := chi.NewRouter()
@@ -83,7 +92,6 @@ func TestPublicFetchSecretsNoMatchingPolicy(t *testing.T) {
 	mux.ServeHTTP(rr, req)
 
 	require.Equal(t, http.StatusOK, rr.Code)
-
 	assert.Equal(t, "{}", strings.TrimSpace(rr.Body.String()))
 
 	entries, err := env.audit.ListEntries(10, 0)
@@ -141,14 +149,20 @@ func TestPublicFetchSecretsPolicyDBError(t *testing.T) {
 	assert.Contains(t, entries[0].Details, `"reason":"policy_lookup_error"`)
 }
 
-func TestPublicFetchSecretsMultiplePoliciesSameProjectEnv(t *testing.T) {
+func TestPublicFetchSecretsMultipleSecretsSamePolicy(t *testing.T) {
 	env := setup(t)
 
-	envID := env.envID(t, "app", "prod")
-	env.db.CreateSecret("KEY1", "val1", envID)
-	env.db.CreateSecret("KEY2", "val2", envID)
-	env.db.CreatePolicy("p1", []string{"myorg/*"}, []string{"*"}, []string{"*"}, envID)
-	env.db.CreatePolicy("p2", []string{"myorg/*"}, []string{"refs/heads/*"}, []string{"*"}, envID)
+	// Attach the same policy to two different secrets (via a shared group).
+	g, err := env.db.CreateGroup(nil, "shared")
+	require.Nil(t, err)
+	gID := g.ID()
+	_, err = env.db.CreateSecret(&gID, "KEY1", "val1")
+	require.Nil(t, err)
+	_, err = env.db.CreateSecret(&gID, "KEY2", "val2")
+	require.Nil(t, err)
+	p, err := env.db.CreatePolicy("p", []string{"myorg/*"}, []string{"*"}, []string{"*"})
+	require.Nil(t, err)
+	require.Nil(t, env.db.AttachPolicy(gID, p.ID))
 
 	h := NewPublicHandler(env.db, env.audit, env.oidc)
 	mux := chi.NewRouter()
@@ -161,22 +175,30 @@ func TestPublicFetchSecretsMultiplePoliciesSameProjectEnv(t *testing.T) {
 	mux.ServeHTTP(rr, req)
 
 	require.Equal(t, http.StatusOK, rr.Code)
-
 	var result map[string]string
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &result))
 	assert.Equal(t, "val1", result["KEY1"])
 	assert.Equal(t, "val2", result["KEY2"])
 }
 
-func TestPublicFetchSecretsMultipleProjectEnvs(t *testing.T) {
+func TestPublicFetchSecretsInheritanceFromAncestor(t *testing.T) {
+	// Policy attached to a group should grant access to every descendant
+	// secret via the recursive CTE.
 	env := setup(t)
 
-	envProd := env.envID(t, "app", "prod")
-	envStaging := env.envID(t, "app", "staging")
-	env.db.CreateSecret("KEY_A", "a", envProd)
-	env.db.CreateSecret("KEY_B", "b", envStaging)
-	env.db.CreatePolicy("p1", []string{"myorg/*"}, []string{"*"}, []string{"*"}, envProd)
-	env.db.CreatePolicy("p2", []string{"myorg/*"}, []string{"*"}, []string{"*"}, envStaging)
+	root, err := env.db.CreateGroup(nil, "root")
+	require.Nil(t, err)
+	rootID := root.ID()
+	mid, err := env.db.CreateGroup(&rootID, "mid")
+	require.Nil(t, err)
+	midID := mid.ID()
+	_, err = env.db.CreateSecret(&midID, "DEEP_SECRET", "deep-value")
+	require.Nil(t, err)
+
+	p, err := env.db.CreatePolicy("p", []string{"myorg/*"}, []string{"*"}, []string{"*"})
+	require.Nil(t, err)
+	// Attach to the top-level group.
+	require.Nil(t, env.db.AttachPolicy(rootID, p.ID))
 
 	h := NewPublicHandler(env.db, env.audit, env.oidc)
 	mux := chi.NewRouter()
@@ -189,25 +211,20 @@ func TestPublicFetchSecretsMultipleProjectEnvs(t *testing.T) {
 	mux.ServeHTTP(rr, req)
 
 	require.Equal(t, http.StatusOK, rr.Code)
-
 	var result map[string]string
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &result))
-	assert.Equal(t, "a", result["KEY_A"])
-	assert.Equal(t, "b", result["KEY_B"])
+	assert.Equal(t, "deep-value", result["DEEP_SECRET"])
 }
 
 func TestPublicFetchSecretsActorPatternMatch(t *testing.T) {
 	env := setup(t)
-
-	envID := env.envID(t, "myapp", "prod")
-	env.db.CreateSecret("DB_URL", "postgres://localhost", envID)
-	env.db.CreatePolicy("allow-deployer", []string{"myorg/*"}, []string{"*"}, []string{"deploy-*"}, envID)
+	attachPolicyTo(t, env, "DB_URL", "postgres://localhost", nil,
+		"allow-deployer", []string{"myorg/*"}, []string{"*"}, []string{"deploy-*"})
 
 	h := NewPublicHandler(env.db, env.audit, env.oidc)
 	mux := chi.NewRouter()
 	h.Register(mux)
 
-	// Actor matches the pattern
 	token := makeOIDCTokenWithActor(t, env.jwk, "myorg/repo", "refs/heads/main", "deploy-bot")
 	req := httptest.NewRequest("GET", "/github/v1/secrets", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -215,7 +232,6 @@ func TestPublicFetchSecretsActorPatternMatch(t *testing.T) {
 	mux.ServeHTTP(rr, req)
 
 	require.Equal(t, http.StatusOK, rr.Code)
-
 	var result map[string]string
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &result))
 	assert.Equal(t, "postgres://localhost", result["DB_URL"])
@@ -223,16 +239,13 @@ func TestPublicFetchSecretsActorPatternMatch(t *testing.T) {
 
 func TestPublicFetchSecretsActorPatternNoMatch(t *testing.T) {
 	env := setup(t)
-
-	envID := env.envID(t, "myapp", "prod")
-	env.db.CreateSecret("DB_URL", "postgres://localhost", envID)
-	env.db.CreatePolicy("allow-deployer", []string{"myorg/*"}, []string{"*"}, []string{"deploy-*"}, envID)
+	attachPolicyTo(t, env, "DB_URL", "postgres://localhost", nil,
+		"allow-deployer", []string{"myorg/*"}, []string{"*"}, []string{"deploy-*"})
 
 	h := NewPublicHandler(env.db, env.audit, env.oidc)
 	mux := chi.NewRouter()
 	h.Register(mux)
 
-	// Actor does NOT match the pattern
 	token := makeOIDCTokenWithActor(t, env.jwk, "myorg/repo", "refs/heads/main", "random-user")
 	req := httptest.NewRequest("GET", "/github/v1/secrets", nil)
 	req.Header.Set("Authorization", "Bearer "+token)

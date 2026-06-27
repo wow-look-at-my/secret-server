@@ -6,13 +6,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	sqlcdb "github.com/wow-look-at-my/secret-server/internal/database/sqlc"
-	"github.com/wow-look-at-my/testify/assert"
-	"github.com/wow-look-at-my/testify/require"
 
 	_ "modernc.org/sqlite"
 )
 
+// setupTestDB creates an in-memory SQLite DB with the composite schema.
+// Mirrors internal/database/sqlc/schema/001_main.sql and 002_audit.sql.
 func setupTestDB(t *testing.T) *sqlcdb.Queries {
 	t.Helper()
 	db, err := sql.Open("sqlite", ":memory:?_pragma=foreign_keys(on)")
@@ -20,26 +22,45 @@ func setupTestDB(t *testing.T) *sqlcdb.Queries {
 	t.Cleanup(func() { db.Close() })
 
 	_, err = db.Exec(`
-		CREATE TABLE environments (
-			id TEXT PRIMARY KEY, project TEXT NOT NULL, environment TEXT NOT NULL,
-			created_at DATETIME NOT NULL, UNIQUE(project, environment)
+		CREATE TABLE secret_nodes (
+			id          TEXT PRIMARY KEY,
+			kind        TEXT NOT NULL CHECK (kind IN ('secret', 'group')),
+			parent_id   TEXT REFERENCES secret_nodes(id) ON DELETE CASCADE,
+			name        TEXT NOT NULL,
+			value       BLOB,
+			created_at  DATETIME NOT NULL DEFAULT (datetime('now')),
+			updated_at  DATETIME NOT NULL DEFAULT (datetime('now')),
+			CHECK ((kind = 'secret' AND value IS NOT NULL)
+				OR (kind = 'group'  AND value IS NULL))
 		);
-		CREATE TABLE secrets (
-			id TEXT PRIMARY KEY, key TEXT NOT NULL, value BLOB NOT NULL,
-			environment_id TEXT NOT NULL REFERENCES environments(id),
-			created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL,
-			UNIQUE(key, environment_id)
-		);
+		CREATE UNIQUE INDEX idx_secret_nodes_secret_name ON secret_nodes(name) WHERE kind = 'secret';
+		CREATE UNIQUE INDEX idx_secret_nodes_group_name  ON secret_nodes(parent_id, name) WHERE kind = 'group';
+
 		CREATE TABLE access_policies (
-			id TEXT PRIMARY KEY, name TEXT NOT NULL,
-			repository_patterns TEXT NOT NULL DEFAULT '[]',
-			ref_patterns TEXT NOT NULL DEFAULT '["*"]',
-			actor_patterns TEXT NOT NULL DEFAULT '["*"]',
-			environment_id TEXT NOT NULL REFERENCES environments(id),
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
 			created_at DATETIME NOT NULL
 		);
-		CREATE INDEX idx_secrets_env_id ON secrets(environment_id);
-		CREATE INDEX idx_policies_env_id ON access_policies(environment_id);
+		CREATE TABLE policy_patterns (
+			policy_id TEXT NOT NULL REFERENCES access_policies(id) ON DELETE CASCADE,
+			kind TEXT NOT NULL CHECK (kind IN ('repository','ref','actor')),
+			pattern TEXT NOT NULL,
+			PRIMARY KEY (policy_id, kind, pattern)
+		);
+		CREATE TABLE secret_node_policies (
+			node_id TEXT NOT NULL REFERENCES secret_nodes(id) ON DELETE CASCADE,
+			policy_id TEXT NOT NULL REFERENCES access_policies(id) ON DELETE CASCADE,
+			PRIMARY KEY (node_id, policy_id)
+		);
+		CREATE TABLE policy_precedence (
+			node_id TEXT NOT NULL,
+			policy_id TEXT NOT NULL,
+			depends_on_id TEXT NOT NULL,
+			PRIMARY KEY (node_id, policy_id, depends_on_id),
+			FOREIGN KEY (node_id, policy_id)     REFERENCES secret_node_policies(node_id, policy_id) ON DELETE CASCADE,
+			FOREIGN KEY (node_id, depends_on_id) REFERENCES secret_node_policies(node_id, policy_id) ON DELETE CASCADE,
+			CHECK (policy_id != depends_on_id)
+		);
 		CREATE TABLE audit_log (
 			id TEXT PRIMARY KEY, timestamp DATETIME NOT NULL,
 			action TEXT NOT NULL, actor_type TEXT NOT NULL, actor_id TEXT NOT NULL,
@@ -51,166 +72,75 @@ func setupTestDB(t *testing.T) *sqlcdb.Queries {
 	return sqlcdb.New(db)
 }
 
-// createEnv is a test helper to create an environment and return its ID.
-func createEnv(t *testing.T, q *sqlcdb.Queries, id, project, env string) {
-	t.Helper()
-	err := q.CreateEnvironment(context.Background(), sqlcdb.CreateEnvironmentParams{
-		ID: id, Project: project, Environment: env, CreatedAt: time.Now().UTC(),
-	})
-	require.Nil(t, err)
-}
-
-func TestSecretQueries(t *testing.T) {
+func TestSecretNodeQueries(t *testing.T) {
 	q := setupTestDB(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	// Create environments first (FK requirement)
-	createEnv(t, q, "env-proj-prod", "proj", "prod")
-	createEnv(t, q, "env-proj-dev", "proj", "dev")
-	createEnv(t, q, "env-other-prod", "other", "prod")
-
-	// Create secrets
-	err := q.CreateSecret(ctx, sqlcdb.CreateSecretParams{
-		ID: "s1", Key: "KEY_A", Value: []byte("enc1"),
-		EnvironmentID: "env-proj-prod", CreatedAt: now, UpdatedAt: now,
+	// Create a group at the root.
+	err := q.CreateSecretNode(ctx, sqlcdb.CreateSecretNodeParams{
+		ID: "g1", Kind: "group", Name: "app", CreatedAt: now, UpdatedAt: now,
 	})
 	require.Nil(t, err)
 
-	err = q.CreateSecret(ctx, sqlcdb.CreateSecretParams{
-		ID: "s2", Key: "KEY_B", Value: []byte("enc2"),
-		EnvironmentID: "env-proj-dev", CreatedAt: now, UpdatedAt: now,
+	// Create a secret inside the group.
+	parent := sql.NullString{String: "g1", Valid: true}
+	err = q.CreateSecretNode(ctx, sqlcdb.CreateSecretNodeParams{
+		ID: "s1", Kind: "secret", ParentID: parent, Name: "API_KEY",
+		Value: []byte("enc"), CreatedAt: now, UpdatedAt: now,
 	})
 	require.Nil(t, err)
 
-	err = q.CreateSecret(ctx, sqlcdb.CreateSecretParams{
-		ID: "s3", Key: "KEY_C", Value: []byte("enc3"),
-		EnvironmentID: "env-other-prod", CreatedAt: now, UpdatedAt: now,
-	})
+	// GetSecretNode.
+	node, err := q.GetSecretNode(ctx, "s1")
 	require.Nil(t, err)
+	assert.Equal(t, "API_KEY", node.Name)
+	assert.Equal(t, "secret", node.Kind)
+	assert.Equal(t, "g1", node.ParentID.String)
 
-	// Get
-	s, err := q.GetSecret(ctx, "s1")
+	// ListRootNodes returns only the group.
+	roots, err := q.ListRootNodes(ctx)
 	require.Nil(t, err)
-	assert.Equal(t, "KEY_A", s.Key)
-	assert.Equal(t, "proj", s.Project)
-	assert.Equal(t, "prod", s.Environment)
-	assert.Equal(t, "env-proj-prod", s.EnvironmentID)
+	require.Equal(t, 1, len(roots))
+	assert.Equal(t, "g1", roots[0].ID)
 
-	// ListSecretsAll
-	all, err := q.ListSecretsAll(ctx)
+	// ListChildNodes under the group returns the secret.
+	kids, err := q.ListChildNodes(ctx, parent)
 	require.Nil(t, err)
-	assert.Equal(t, 3, len(all))
+	require.Equal(t, 1, len(kids))
+	assert.Equal(t, "s1", kids[0].ID)
 
-	// ListSecretsByProject
-	byProj, err := q.ListSecretsByProject(ctx, "proj")
+	// CountNodesByKind.
+	n, err := q.CountNodesByKind(ctx, "secret")
 	require.Nil(t, err)
-	assert.Equal(t, 2, len(byProj))
-
-	// ListSecretsByEnv
-	byEnv, err := q.ListSecretsByEnv(ctx, "prod")
-	require.Nil(t, err)
-	assert.Equal(t, 2, len(byEnv))
-
-	// ListSecretsByProjectAndEnv
-	byBoth, err := q.ListSecretsByProjectAndEnv(ctx, sqlcdb.ListSecretsByProjectAndEnvParams{
-		Project: "proj", Environment: "prod",
-	})
-	require.Nil(t, err)
-	assert.Equal(t, 1, len(byBoth))
-
-	// GetSecretsByEnvironmentID
-	kv, err := q.GetSecretsByEnvironmentID(ctx, "env-proj-prod")
-	require.Nil(t, err)
-	assert.Equal(t, 1, len(kv))
-	assert.Equal(t, "KEY_A", kv[0].Key)
-
-	// Update
-	result, err := q.UpdateSecret(ctx, sqlcdb.UpdateSecretParams{
-		Key: "KEY_A", Value: []byte("updated"),
-		EnvironmentID: "env-proj-prod", UpdatedAt: now, ID: "s1",
-	})
-	require.Nil(t, err)
-	n, _ := result.RowsAffected()
 	assert.Equal(t, int64(1), n)
 
-	// Delete
-	result, err = q.DeleteSecret(ctx, "s1")
+	// FindSecretByName.
+	found, err := q.FindSecretByName(ctx, "API_KEY")
 	require.Nil(t, err)
-	n, _ = result.RowsAffected()
-	assert.Equal(t, int64(1), n)
+	assert.Equal(t, "s1", found.ID)
 
-	// CountSecrets
-	count, err := q.CountSecrets(ctx)
-	require.Nil(t, err)
-	assert.Equal(t, int64(2), count)
-
-	// SecretCountsByProjectEnv
-	stats, err := q.SecretCountsByProjectEnv(ctx)
-	require.Nil(t, err)
-	assert.Equal(t, 2, len(stats))
-}
-
-func TestEnvironmentQueries(t *testing.T) {
-	q := setupTestDB(t)
-	ctx := context.Background()
-	now := time.Now().UTC()
-
-	err := q.CreateEnvironment(ctx, sqlcdb.CreateEnvironmentParams{
-		ID: "e1", Project: "proj", Environment: "prod", CreatedAt: now,
+	// UpdateSecretNodeName.
+	res, err := q.UpdateSecretNodeName(ctx, sqlcdb.UpdateSecretNodeNameParams{
+		Name: "RENAMED", UpdatedAt: now, ID: "s1",
 	})
 	require.Nil(t, err)
+	rows, _ := res.RowsAffected()
+	assert.Equal(t, int64(1), rows)
 
-	env, err := q.GetEnvironment(ctx, "e1")
-	require.Nil(t, err)
-	assert.Equal(t, "proj", env.Project)
-
-	envs, err := q.ListEnvironments(ctx)
-	require.Nil(t, err)
-	assert.Equal(t, 1, len(envs))
-
-	count, err := q.CountEnvironments(ctx)
-	require.Nil(t, err)
-	assert.Equal(t, int64(1), count)
-
-	// InsertEnvironmentIgnore (duplicate should not error)
-	err = q.InsertEnvironmentIgnore(ctx, sqlcdb.InsertEnvironmentIgnoreParams{
-		ID: "e2", Project: "proj", Environment: "prod",
+	// UpdateSecretNodeValue.
+	res, err = q.UpdateSecretNodeValue(ctx, sqlcdb.UpdateSecretNodeValueParams{
+		Value: []byte("new-enc"), UpdatedAt: now, ID: "s1",
 	})
 	require.Nil(t, err)
+	rows, _ = res.RowsAffected()
+	assert.Equal(t, int64(1), rows)
 
-	// Verify no duplicate was created
-	envs, err = q.ListEnvironments(ctx)
+	// DeleteSecretNode.
+	res, err = q.DeleteSecretNode(ctx, "s1")
 	require.Nil(t, err)
-	assert.Equal(t, 1, len(envs))
-
-	// UpdateEnvironment
-	result, err := q.UpdateEnvironment(ctx, sqlcdb.UpdateEnvironmentParams{
-		Project: "proj-renamed", Environment: "production", ID: "e1",
-	})
-	require.Nil(t, err)
-	n, _ := result.RowsAffected()
-	assert.Equal(t, int64(1), n)
-
-	env, err = q.GetEnvironment(ctx, "e1")
-	require.Nil(t, err)
-	assert.Equal(t, "proj-renamed", env.Project)
-
-	// EnvironmentInUseSecrets (no secrets yet)
-	count, err = q.EnvironmentInUseSecrets(ctx, "e1")
-	require.Nil(t, err)
-	assert.Equal(t, int64(0), count)
-
-	// EnvironmentInUsePolicies (no policies yet)
-	count, err = q.EnvironmentInUsePolicies(ctx, "e1")
-	require.Nil(t, err)
-	assert.Equal(t, int64(0), count)
-
-	// Delete
-	delResult, err := q.DeleteEnvironment(ctx, "e1")
-	require.Nil(t, err)
-	n, _ = delResult.RowsAffected()
-	assert.Equal(t, int64(1), n)
+	rows, _ = res.RowsAffected()
+	assert.Equal(t, int64(1), rows)
 }
 
 func TestPolicyQueries(t *testing.T) {
@@ -218,23 +148,14 @@ func TestPolicyQueries(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	// Create environment first (FK requirement)
-	createEnv(t, q, "env-1", "proj", "prod")
-
 	err := q.CreatePolicy(ctx, sqlcdb.CreatePolicyParams{
-		ID: "p1", Name: "Allow prod", RepositoryPatterns: `["org/*"]`,
-		RefPatterns: `["refs/heads/main"]`, ActorPatterns: `["*"]`,
-		EnvironmentID: "env-1", CreatedAt: now,
+		ID: "p1", Name: "Allow prod", CreatedAt: now,
 	})
 	require.Nil(t, err)
 
 	p, err := q.GetPolicy(ctx, "p1")
 	require.Nil(t, err)
 	assert.Equal(t, "Allow prod", p.Name)
-	assert.Equal(t, "proj", p.Project)
-	assert.Equal(t, "prod", p.Environment)
-	assert.Equal(t, "env-1", p.EnvironmentID)
-	assert.Equal(t, `["org/*"]`, p.RepositoryPatterns)
 
 	policies, err := q.ListPolicies(ctx)
 	require.Nil(t, err)
@@ -244,18 +165,172 @@ func TestPolicyQueries(t *testing.T) {
 	require.Nil(t, err)
 	assert.Equal(t, int64(1), count)
 
-	result, err := q.UpdatePolicy(ctx, sqlcdb.UpdatePolicyParams{
-		Name: "Updated", RepositoryPatterns: `["other/*"]`, RefPatterns: `["*"]`,
-		ActorPatterns: `["*"]`, EnvironmentID: "env-1", ID: "p1",
+	res, err := q.UpdatePolicyName(ctx, sqlcdb.UpdatePolicyNameParams{
+		Name: "Renamed", ID: "p1",
 	})
 	require.Nil(t, err)
-	n, _ := result.RowsAffected()
+	n, _ := res.RowsAffected()
 	assert.Equal(t, int64(1), n)
 
-	result, err = q.DeletePolicy(ctx, "p1")
+	res, err = q.DeletePolicy(ctx, "p1")
 	require.Nil(t, err)
-	n, _ = result.RowsAffected()
+	n, _ = res.RowsAffected()
 	assert.Equal(t, int64(1), n)
+}
+
+func TestPolicyPatternQueries(t *testing.T) {
+	q := setupTestDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Need a policy row to reference.
+	require.Nil(t, q.CreatePolicy(ctx, sqlcdb.CreatePolicyParams{ID: "p1", Name: "p", CreatedAt: now}))
+
+	// Insert patterns of each kind.
+	require.Nil(t, q.InsertPolicyPattern(ctx, sqlcdb.InsertPolicyPatternParams{PolicyID: "p1", Kind: "repository", Pattern: "myorg/*"}))
+	require.Nil(t, q.InsertPolicyPattern(ctx, sqlcdb.InsertPolicyPatternParams{PolicyID: "p1", Kind: "ref", Pattern: "refs/heads/main"}))
+	require.Nil(t, q.InsertPolicyPattern(ctx, sqlcdb.InsertPolicyPatternParams{PolicyID: "p1", Kind: "actor", Pattern: "*"}))
+
+	patterns, err := q.ListPolicyPatterns(ctx, "p1")
+	require.Nil(t, err)
+	require.Equal(t, 3, len(patterns))
+
+	// DeletePolicyPatternsOfKind.
+	require.Nil(t, q.DeletePolicyPatternsOfKind(ctx, sqlcdb.DeletePolicyPatternsOfKindParams{
+		PolicyID: "p1", Kind: "actor",
+	}))
+	patterns, err = q.ListPolicyPatterns(ctx, "p1")
+	require.Nil(t, err)
+	require.Equal(t, 2, len(patterns))
+
+	// DeleteAllPolicyPatterns.
+	require.Nil(t, q.DeleteAllPolicyPatterns(ctx, "p1"))
+	patterns, err = q.ListPolicyPatterns(ctx, "p1")
+	require.Nil(t, err)
+	assert.Equal(t, 0, len(patterns))
+}
+
+func TestAttachDetachAndPrecedence(t *testing.T) {
+	q := setupTestDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Build a node and two policies.
+	require.Nil(t, q.CreateSecretNode(ctx, sqlcdb.CreateSecretNodeParams{
+		ID: "n1", Kind: "group", Name: "g", CreatedAt: now, UpdatedAt: now,
+	}))
+	require.Nil(t, q.CreatePolicy(ctx, sqlcdb.CreatePolicyParams{ID: "pa", Name: "a", CreatedAt: now}))
+	require.Nil(t, q.CreatePolicy(ctx, sqlcdb.CreatePolicyParams{ID: "pb", Name: "b", CreatedAt: now}))
+
+	// Attach both.
+	require.Nil(t, q.AttachNodePolicy(ctx, sqlcdb.AttachNodePolicyParams{NodeID: "n1", PolicyID: "pa"}))
+	require.Nil(t, q.AttachNodePolicy(ctx, sqlcdb.AttachNodePolicyParams{NodeID: "n1", PolicyID: "pb"}))
+
+	// ListNodePolicies.
+	list, err := q.ListNodePolicies(ctx, "n1")
+	require.Nil(t, err)
+	assert.Equal(t, 2, len(list))
+
+	cnt, err := q.CountAttachedPoliciesForNode(ctx, "n1")
+	require.Nil(t, err)
+	assert.Equal(t, int64(2), cnt)
+
+	// Precedence edge a->b (a depends on b).
+	require.Nil(t, q.AddPolicyPrecedence(ctx, sqlcdb.AddPolicyPrecedenceParams{
+		NodeID: "n1", PolicyID: "pa", DependsOnID: "pb",
+	}))
+	edges, err := q.ListNodePolicyPrecedence(ctx, "n1")
+	require.Nil(t, err)
+	require.Equal(t, 1, len(edges))
+
+	// RemovePolicyPrecedence.
+	res, err := q.RemovePolicyPrecedence(ctx, sqlcdb.RemovePolicyPrecedenceParams{
+		NodeID: "n1", PolicyID: "pa", DependsOnID: "pb",
+	})
+	require.Nil(t, err)
+	n, _ := res.RowsAffected()
+	assert.Equal(t, int64(1), n)
+
+	// DetachNodePolicy.
+	res, err = q.DetachNodePolicy(ctx, sqlcdb.DetachNodePolicyParams{NodeID: "n1", PolicyID: "pb"})
+	require.Nil(t, err)
+	n, _ = res.RowsAffected()
+	assert.Equal(t, int64(1), n)
+
+	// CountNodesReferencingPolicy.
+	cnt, err = q.CountNodesReferencingPolicy(ctx, "pa")
+	require.Nil(t, err)
+	assert.Equal(t, int64(1), cnt)
+}
+
+func TestAuthorizedSecretsQuery(t *testing.T) {
+	// Exercises the recursive-CTE query end to end. Build a small tree and
+	// attach a policy; verify AuthorizedSecrets returns the inherited leaf.
+	q := setupTestDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	require.Nil(t, q.CreateSecretNode(ctx, sqlcdb.CreateSecretNodeParams{
+		ID: "g1", Kind: "group", Name: "g", CreatedAt: now, UpdatedAt: now,
+	}))
+	parent := sql.NullString{String: "g1", Valid: true}
+	require.Nil(t, q.CreateSecretNode(ctx, sqlcdb.CreateSecretNodeParams{
+		ID: "s1", Kind: "secret", ParentID: parent, Name: "LEAF",
+		Value: []byte("v"), CreatedAt: now, UpdatedAt: now,
+	}))
+	require.Nil(t, q.CreatePolicy(ctx, sqlcdb.CreatePolicyParams{ID: "p1", Name: "p", CreatedAt: now}))
+	require.Nil(t, q.AttachNodePolicy(ctx, sqlcdb.AttachNodePolicyParams{NodeID: "g1", PolicyID: "p1"}))
+
+	rows, err := q.AuthorizedSecrets(ctx, []string{"p1"})
+	require.Nil(t, err)
+	require.Equal(t, 1, len(rows))
+	assert.Equal(t, "LEAF", rows[0].Name)
+
+	// Empty policy ID slice is the NULL path.
+	rows, err = q.AuthorizedSecrets(ctx, nil)
+	require.Nil(t, err)
+	assert.Equal(t, 0, len(rows))
+}
+
+func TestListAllNodesQuery(t *testing.T) {
+	q := setupTestDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	require.Nil(t, q.CreateSecretNode(ctx, sqlcdb.CreateSecretNodeParams{
+		ID: "n1", Kind: "group", Name: "g", CreatedAt: now, UpdatedAt: now,
+	}))
+	require.Nil(t, q.CreateSecretNode(ctx, sqlcdb.CreateSecretNodeParams{
+		ID: "n2", Kind: "secret", Name: "SECRET", Value: []byte("v"),
+		CreatedAt: now, UpdatedAt: now,
+	}))
+
+	all, err := q.ListAllNodes(ctx)
+	require.Nil(t, err)
+	assert.Equal(t, 2, len(all))
+}
+
+func TestListNodesReferencingPolicyQuery(t *testing.T) {
+	q := setupTestDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	require.Nil(t, q.CreateSecretNode(ctx, sqlcdb.CreateSecretNodeParams{
+		ID: "n1", Kind: "group", Name: "g", CreatedAt: now, UpdatedAt: now,
+	}))
+	require.Nil(t, q.CreatePolicy(ctx, sqlcdb.CreatePolicyParams{ID: "p1", Name: "p", CreatedAt: now}))
+	require.Nil(t, q.AttachNodePolicy(ctx, sqlcdb.AttachNodePolicyParams{NodeID: "n1", PolicyID: "p1"}))
+
+	nodes, err := q.ListNodesReferencingPolicy(ctx, "p1")
+	require.Nil(t, err)
+	require.Equal(t, 1, len(nodes))
+	assert.Equal(t, "n1", nodes[0].ID)
+}
+
+func TestFindSecretByNameNotFound(t *testing.T) {
+	q := setupTestDB(t)
+	_, err := q.FindSecretByName(context.Background(), "nothing")
+	require.ErrorIs(t, err, sql.ErrNoRows)
 }
 
 func TestAuditQueries(t *testing.T) {
