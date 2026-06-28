@@ -3,7 +3,6 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -66,14 +65,15 @@ func (h *UIHandler) editPolicy(w http.ResponseWriter, r *http.Request) {
 // parsePolicyPatternsForm extracts and validates the three pattern lists
 // from an access-policy form submission. Empty ref/actor lists default to
 // ["*"] so the common "allow any ref / any actor" case still works without
-// the user typing it; repository patterns must be explicit.
+// the user typing it. An empty repository list is allowed: it produces a
+// policy with no repository patterns, which matches nothing (the repository
+// inner JOIN in MatchingPolicyIDs yields no rows) and therefore grants no
+// access. That fail-closed behaviour is what makes it safe to create an
+// empty policy now and fill in patterns later.
 func parsePolicyPatternsForm(r *http.Request) (repo, ref, actor []string, err error) {
 	repo = parsePatternLines(r.FormValue("repository_patterns"))
 	ref = parsePatternLines(r.FormValue("ref_patterns"))
 	actor = parsePatternLines(r.FormValue("actor_patterns"))
-	if len(repo) == 0 {
-		return nil, nil, nil, fmt.Errorf("at least one repository pattern is required")
-	}
 	if len(ref) == 0 {
 		ref = []string{"*"}
 	}
