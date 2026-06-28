@@ -448,9 +448,11 @@ func (h *AdminHandler) removeNodePrecedence(w http.ResponseWriter, r *http.Reque
 // --- Policies ---
 
 // policyRequest is the JSON body for create/update policy endpoints.
-// RepositoryPatterns must be non-empty; ref and actor default to ["*"] when
+// All three pattern lists may be empty. Ref and actor default to ["*"] when
 // omitted (matching everything is a common and reasonable default for those
-// kinds; for repository we deliberately require explicit patterns).
+// kinds). An empty repository list is left empty, which makes the policy match
+// nothing (fail-closed) — that is what allows a placeholder policy to be saved
+// now and have its patterns filled in later without granting any access.
 type policyRequest struct {
 	Name               string   `json:"name"`
 	RepositoryPatterns []string `json:"repository_patterns"`
@@ -513,8 +515,8 @@ func (h *AdminHandler) createPolicy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
 		return
 	}
-	if req.Name == "" || len(req.RepositoryPatterns) == 0 {
-		http.Error(w, `{"error":"name and repository_patterns are required"}`, http.StatusBadRequest)
+	if req.Name == "" {
+		http.Error(w, `{"error":"name is required"}`, http.StatusBadRequest)
 		return
 	}
 	if err := req.normalize(); err != nil {
@@ -549,10 +551,6 @@ func (h *AdminHandler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 	var req policyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
-		return
-	}
-	if len(req.RepositoryPatterns) == 0 {
-		http.Error(w, `{"error":"repository_patterns must not be empty"}`, http.StatusBadRequest)
 		return
 	}
 	if err := req.normalize(); err != nil {

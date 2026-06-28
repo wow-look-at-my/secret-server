@@ -229,25 +229,37 @@ func TestAdminPolicyCRUD(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, rr.Code)
 }
 
-func TestAdminCreatePolicyMissingFields(t *testing.T) {
+func TestAdminCreatePolicyMissingName(t *testing.T) {
 	env := setup(t)
 	h := NewAdminHandler(env.db, env.audit)
 	mux := chi.NewRouter()
 	h.Register(mux)
 
-	// Empty name.
+	// Empty name is still rejected.
 	body := `{"repository_patterns":["org/*"]}`
 	req := jsonReq("POST", "/admin/v1/policies", body)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
 
-	// Empty repository_patterns.
-	body = `{"name":"x"}`
-	req = jsonReq("POST", "/admin/v1/policies", body)
-	rr = httptest.NewRecorder()
+func TestAdminCreatePolicyEmptyRepoPatternsAllowed(t *testing.T) {
+	env := setup(t)
+	h := NewAdminHandler(env.db, env.audit)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	// A name-only body (no repository patterns) creates a fail-closed
+	// placeholder policy that matches nothing until patterns are added.
+	body := `{"name":"x"}`
+	req := jsonReq("POST", "/admin/v1/policies", body)
+	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
-	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	require.Equal(t, http.StatusCreated, rr.Code)
+
+	policies, _ := env.db.ListPolicies()
+	require.Equal(t, 1, len(policies))
+	assert.Empty(t, policies[0].RepositoryPatterns)
 }
 
 func TestAdminCreatePolicyDefaultRefActor(t *testing.T) {

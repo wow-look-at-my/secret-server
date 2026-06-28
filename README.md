@@ -95,11 +95,11 @@ Groups exist purely to organize secrets and to attach policies that inherit down
 
 Policies are pure pattern-match rules that you **attach** to one or more nodes. Each policy specifies:
 
-- **Repository patterns** — one or more SQLite GLOB patterns matching repository names (e.g. `myorg/*`, `myorg/api-*`). At least one is required. A request matches if the repository matches **any** of the listed globs.
+- **Repository patterns** — zero or more SQLite GLOB patterns matching repository names (e.g. `myorg/*`, `myorg/api-*`). A request matches if the repository matches **any** of the listed globs. Leaving this empty is allowed: the policy then has no repository patterns and matches nothing (see below), so you can create a placeholder policy now and add patterns later without granting any access in the meantime.
 - **Ref patterns** — one or more SQLite GLOB patterns matching git refs (e.g. `refs/heads/main`, `refs/tags/v*`). At least one is required (`*` for "any ref"). In the UI, leaving the field blank defaults to `*`.
 - **Actor patterns** — one or more SQLite GLOB patterns matching the GitHub username that triggered the workflow (e.g. `deploy-*`). At least one is required (`*` for "any actor"). In the UI, leaving the field blank defaults to `*`.
 
-A policy with zero patterns of any kind matches nothing — there is no implicit "empty = wildcard" behavior. Patterns are stored as normalized rows in `policy_patterns(policy_id, kind, pattern)` so matching runs entirely inside SQLite via the native `GLOB` operator.
+A policy with zero patterns of any kind matches nothing — there is no implicit "empty = wildcard" behavior. This is fail-closed: an empty (or partially-filled) policy never grants access, which is what makes it safe to save an incomplete policy and finish it later. Patterns are stored as normalized rows in `policy_patterns(policy_id, kind, pattern)` so matching runs entirely inside SQLite via the native `GLOB` operator.
 
 When a GitHub Actions workflow requests secrets, the server:
 

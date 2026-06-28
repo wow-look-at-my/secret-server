@@ -104,6 +104,37 @@ func TestPublicFetchSecretsNoMatchingPolicy(t *testing.T) {
 	assert.Contains(t, entries[0].Details, `"repository":"myorg/repo"`)
 }
 
+// TestPublicFetchSecretsEmptyPolicyGrantsNoAccess is the security guard for
+// allowing empty policies: an attached policy with no repository patterns must
+// match nothing (the repository inner JOIN in MatchingPolicyIDs yields no rows)
+// and therefore grant no secrets, even though it is attached to the secret.
+func TestPublicFetchSecretsEmptyPolicyGrantsNoAccess(t *testing.T) {
+	env := setup(t)
+	// Empty repository patterns; ref/actor are wide open. Fail-closed because
+	// the repository kind has zero pattern rows.
+	attachPolicyTo(t, env, "KEY", "val", nil,
+		"empty", nil, []string{"*"}, []string{"*"})
+
+	h := NewPublicHandler(env.db, env.audit, env.oidc)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	token := makeOIDCToken(t, env.jwk, "myorg/repo", "refs/heads/main")
+	req := httptest.NewRequest("GET", "/github/v1/secrets", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	assert.Equal(t, "{}", strings.TrimSpace(rr.Body.String()))
+
+	entries, err := env.audit.ListEntries(10, 0)
+	require.Nil(t, err)
+	require.Equal(t, 1, len(entries))
+	assert.Equal(t, "secret.access.denied", entries[0].Action)
+	assert.Contains(t, entries[0].Details, `"reason":"no_matching_policies"`)
+}
+
 func TestPublicFetchSecretsInvalidToken(t *testing.T) {
 	env := setup(t)
 	h := NewPublicHandler(env.db, env.audit, env.oidc)

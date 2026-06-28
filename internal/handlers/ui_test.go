@@ -204,20 +204,24 @@ func TestUIPolicyCreateAndDelete(t *testing.T) {
 	assert.Equal(t, 0, len(policies))
 }
 
-func TestUICreatePolicyMissingRepoPatterns(t *testing.T) {
+func TestUICreatePolicyEmptyRepoPatternsAllowed(t *testing.T) {
 	env := setup(t)
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
 	mux := chi.NewRouter()
 	h.Register(mux)
 
-	form := "name=test&repository_patterns=&ref_patterns=*"
+	// A policy with no repository patterns may be created now and filled in
+	// later. It is fail-closed: it matches nothing until patterns are added.
+	form := "name=test&repository_patterns=&ref_patterns=*&actor_patterns=*"
 	req := httptest.NewRequest("POST", "/admin/policies", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
-	// Error is shown inline in the rendered form, not a status code change.
-	assert.Equal(t, http.StatusOK, rr.Code)
-	assert.Contains(t, rr.Body.String(), "at least one repository pattern")
+	assert.Equal(t, http.StatusSeeOther, rr.Code)
+
+	policies, _ := env.db.ListPolicies()
+	require.Equal(t, 1, len(policies))
+	assert.Empty(t, policies[0].RepositoryPatterns)
 }
 
 func TestUICatchAllRedirects(t *testing.T) {
