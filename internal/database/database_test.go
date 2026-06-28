@@ -355,6 +355,36 @@ func TestMatchingPolicyIDsActorFilter(t *testing.T) {
 	assert.Equal(t, 0, len(ids))
 }
 
+// TestMatchingPolicyIDsLiteralBracketActor guards the bracket-escaping in
+// matchingPolicyIDsSQL: bot actor logins contain literal `[`/`]`, which raw
+// SQLite GLOB would treat as a character class — so the pattern would never
+// match the real login and would over-match the class expansion instead.
+func TestMatchingPolicyIDsLiteralBracketActor(t *testing.T) {
+	db := testDB(t)
+	ctx := context.Background()
+
+	p, _ := db.CreatePolicy("bots", []string{"wow-look-at-my/*"}, []string{"*"}, []string{"pr-minder[bot]", "dependabot[bot]"})
+
+	// The literal bot logins match their exact patterns.
+	for _, actor := range []string{"pr-minder[bot]", "dependabot[bot]"} {
+		ids, err := db.MatchingPolicyIDs(ctx, "wow-look-at-my/webhooks", "refs/heads/anything", actor)
+		require.Nil(t, err)
+		assert.Equal(t, []string{p.ID}, ids, "literal-bracket actor %q must match its exact pattern", actor)
+	}
+
+	// The char-class expansion must NOT leak: "pr-minderb" (which an unescaped
+	// glob `[bot]` would have accepted) must not match.
+	ids, err := db.MatchingPolicyIDs(ctx, "wow-look-at-my/webhooks", "refs/heads/anything", "pr-minderb")
+	require.Nil(t, err)
+	assert.Equal(t, 0, len(ids), "char-class over-match must not happen for a literal-bracket pattern")
+
+	// A plain `*` wildcard pattern still globs as before.
+	pw, _ := db.CreatePolicy("anyactor", []string{"wow-look-at-my/*"}, []string{"*"}, []string{"*"})
+	ids, err = db.MatchingPolicyIDs(ctx, "wow-look-at-my/webhooks", "refs/heads/anything", "whoever")
+	require.Nil(t, err)
+	assert.Contains(t, ids, pw.ID)
+}
+
 // --- Attach/detach, authorized secrets, precedence ---
 
 func TestAttachDetachAndAuthorizedSecrets(t *testing.T) {

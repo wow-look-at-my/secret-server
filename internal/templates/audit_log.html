@@ -58,15 +58,49 @@
 {{end}}
 
 <script>
+// Collapse whitespace in an element's text. Returns "" for a missing element.
+function cellText(el) {
+    return el ? el.textContent.replace(/\s+/g, " ").trim() : "";
+}
+
+// The details cell renders a <dl> of key/value pairs inside a <details>
+// disclosure. textContent on the whole cell glues the "details" summary word
+// and every dt straight onto its dd ("reasonno_matching_policies refrefs/..."),
+// so build the field list from the <dl> structure instead, as "key=value".
+function detailsText(cell) {
+    var dl = cell.querySelector("dl.detail-list");
+    if (dl) {
+        var pairs = [];
+        dl.querySelectorAll("div").forEach(function(div) {
+            var dt = cellText(div.querySelector("dt"));
+            var dd = cellText(div.querySelector("dd"));
+            if (dt) pairs.push(dt + "=" + dd);
+        });
+        if (pairs.length) return pairs.join(", ");
+    }
+    // No structured map: fall back to the summary or the raw JSON cell.
+    return cellText(cell.querySelector(".audit-summary")) ||
+           cellText(cell.querySelector(".audit-details")) ||
+           cellText(cell);
+}
+
 function copyRow(btn) {
     var row = btn.closest("tr");
     var cells = row.querySelectorAll("td");
-    var headers = ["Time", "Action", "Actor", "Resource", "Details"];
-    var parts = [];
-    for (var i = 0; i < headers.length && i < cells.length; i++) {
-        var text = cells[i].textContent.replace(/\s+/g, " ").trim();
-        if (text) parts.push(headers[i] + ": " + text);
+    if (cells.length < 5) return;
+    // Render actor as "display (subtext)" when a subtext line is present.
+    var sub = cellText(cells[2].querySelector(".actor-subtext"));
+    var actor = cellText(cells[2]);
+    if (sub) {
+        actor = actor.slice(0, actor.length - sub.length).trim() + " (" + sub + ")";
     }
+    var parts = [
+        "Time: " + cellText(cells[0]),
+        "Action: " + cellText(cells[1]),
+        "Actor: " + actor,
+        "Resource: " + cellText(cells[3]),
+        "Details: " + detailsText(cells[4]),
+    ];
     navigator.clipboard.writeText(parts.join(" | ")).then(function() {
         btn.textContent = "Copied";
         btn.classList.add("copied");

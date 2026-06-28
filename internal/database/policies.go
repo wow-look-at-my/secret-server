@@ -473,13 +473,27 @@ func (d *DB) RemovePrecedence(nodeID, policyID, dependsOnID string) error {
 // truncates the tail of generated query strings when SQLite `?` placeholders
 // appear in certain contexts (the offset bookkeeping gets off-by-N). See the
 // note in internal/database/sqlc/queries/policy_patterns.sql.
+//
+// Each pattern is bracket-escaped before matching: `replace(pattern,'[','[[]')`
+// turns every `[` into GLOB's literal-bracket token `[[]`. This is load-bearing.
+// SQLite GLOB treats `[...]` as a character class and has NO escape mechanism,
+// so without this a pattern with literal brackets — notably bot actors like
+// `pr-minder[bot]` / `dependabot[bot]` — both fails to match its own literal
+// value AND silently over-matches the class expansion (`pr-minder[bot]` would
+// glob to "pr-minder" + one of b/o/t, matching `pr-minderb` but never the real
+// `pr-minder[bot]`). Escaping `[` makes brackets literal, so `pr-minder[bot]`
+// matches exactly `pr-minder[bot]` and nothing else. `*` / `?` wildcards are
+// untouched, and a bracket-free pattern (`myorg/*`, `refs/heads/main`) escapes
+// to itself — zero behavior change for every pattern that already worked.
 const matchingPolicyIDsSQL = `
 SELECT DISTINCT p.id
 FROM access_policies p
 JOIN policy_patterns pr ON pr.policy_id = p.id AND pr.kind = 'repository'
 JOIN policy_patterns pf ON pf.policy_id = p.id AND pf.kind = 'ref'
 JOIN policy_patterns pa ON pa.policy_id = p.id AND pa.kind = 'actor'
-WHERE ? GLOB pr.pattern AND ? GLOB pf.pattern AND ? GLOB pa.pattern
+WHERE ? GLOB replace(pr.pattern, '[', '[[]')
+  AND ? GLOB replace(pf.pattern, '[', '[[]')
+  AND ? GLOB replace(pa.pattern, '[', '[[]')
 `
 
 // MatchingPolicyIDs returns every policy whose pattern rows all match the
