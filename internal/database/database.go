@@ -3,12 +3,14 @@ package database
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"time"
 
-	"github.com/google/uuid"
 	"github.com/wow-look-at-my/secret-server/internal/crypto"
-	"github.com/wow-look-at-my/secret-server/internal/database/sqlc"
+	sqlcdb "github.com/wow-look-at-my/secret-server/internal/database/sqlc"
 
 	_ "modernc.org/sqlite"
 )
@@ -41,312 +43,377 @@ func (d *DB) Close() error {
 	return d.db.Close()
 }
 
+// migrate runs all database-schema migrations in order. It is safe to call
+// on a fresh database (all CREATE TABLEs are IF NOT EXISTS) and safe to call
+// on a database from any prior schema version — the legacy converter detects
+// the old environments-based layout and rewrites it into the composite tree.
 func (d *DB) migrate() error {
-	// Environments table (must exist before FK-referencing tables).
-	_, err := d.db.Exec(`
-		CREATE TABLE IF NOT EXISTS environments (
-			id TEXT PRIMARY KEY,
-			project TEXT NOT NULL,
-			environment TEXT NOT NULL,
-			created_at DATETIME NOT NULL DEFAULT (datetime('now')),
-			UNIQUE(project, environment)
-		);
-	`)
-	if err != nil {
-		return fmt.Errorf("create environments table: %w", err)
-	}
-
-	// Check if we need to migrate from old schema (project/environment columns)
-	// to new schema (environment_id FK).
-	needsMigration, err := d.hasOldSchema()
+	// Detect whether we're upgrading from the legacy schema (has an
+	// `environments` table with project/environment columns) or starting
+	// fresh / already on the composite schema.
+	legacy, err := d.hasLegacySchema()
 	if err != nil {
 		return fmt.Errorf("check schema: %w", err)
 	}
-
-	if needsMigration {
-		if err := d.migrateToEnvironmentID(); err != nil {
-			return fmt.Errorf("migrate to environment_id: %w", err)
+	if legacy {
+		if err := d.migrateLegacyToComposite(); err != nil {
+			return fmt.Errorf("migrate legacy schema: %w", err)
 		}
-	} else {
-		// Fresh install or already migrated — create tables with new schema.
-		_, err = d.db.Exec(`
-			CREATE TABLE IF NOT EXISTS secrets (
-				id TEXT PRIMARY KEY,
-				key TEXT NOT NULL,
-				value BLOB NOT NULL,
-				environment_id TEXT NOT NULL REFERENCES environments(id),
-				created_at DATETIME NOT NULL DEFAULT (datetime('now')),
-				updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
-				UNIQUE(key, environment_id)
-			);
-
-			CREATE TABLE IF NOT EXISTS access_policies (
-				id TEXT PRIMARY KEY,
-				name TEXT NOT NULL,
-				repository_patterns TEXT NOT NULL DEFAULT '[]',
-				ref_patterns TEXT NOT NULL DEFAULT '["*"]',
-				actor_patterns TEXT NOT NULL DEFAULT '["*"]',
-				environment_id TEXT NOT NULL REFERENCES environments(id),
-				created_at DATETIME NOT NULL DEFAULT (datetime('now'))
-			);
-
-			CREATE INDEX IF NOT EXISTS idx_secrets_env_id ON secrets(environment_id);
-			CREATE INDEX IF NOT EXISTS idx_policies_env_id ON access_policies(environment_id);
-		`)
-		if err != nil {
-			return err
-		}
+		return nil
 	}
 
-	// Add actor_pattern column if it doesn't exist yet (upgrade path).
-	if err := d.migrateActorPattern(); err != nil {
-		return fmt.Errorf("migrate actor_pattern: %w", err)
+	// Fresh install or already on the composite schema — create tables with
+	// the current schema (IF NOT EXISTS makes this idempotent).
+	if err := d.createCompositeSchema(d.db); err != nil {
+		return fmt.Errorf("create schema: %w", err)
 	}
-
-	// Convert singular *_pattern columns to JSON-array *_patterns columns.
-	if err := d.migratePolicyPatternLists(); err != nil {
-		return fmt.Errorf("migrate policy pattern lists: %w", err)
-	}
-
-	// Machine tokens (bearer credentials for non-Actions clients). Added after
-	// the env-id/pattern migrations so the environments table it references
-	// already exists. Idempotent CREATE — present on fresh installs too.
-	if err := d.migrateMachineTokens(); err != nil {
-		return fmt.Errorf("migrate machine tokens: %w", err)
-	}
-
 	return nil
 }
 
-// migrateMachineTokens creates the machine_tokens table and its index if they
-// do not already exist. Idempotent — safe on every startup.
-func (d *DB) migrateMachineTokens() error {
-	_, err := d.db.Exec(`
-		CREATE TABLE IF NOT EXISTS machine_tokens (
-			id TEXT PRIMARY KEY,
-			name TEXT NOT NULL,
-			token_hash TEXT NOT NULL UNIQUE,
-			token_prefix TEXT NOT NULL DEFAULT '',
-			environment_id TEXT NOT NULL REFERENCES environments(id),
-			created_at DATETIME NOT NULL DEFAULT (datetime('now')),
-			last_used_at DATETIME
-		);
-		CREATE INDEX IF NOT EXISTS idx_machine_tokens_env_id ON machine_tokens(environment_id);
-	`)
-	return err
+// hasLegacySchema reports whether the database still has the old
+// environments-based layout. We detect it by the presence of the
+// `environments` table, which the composite schema does not create.
+func (d *DB) hasLegacySchema() (bool, error) {
+	var name string
+	err := d.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='environments'`).Scan(&name)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
-// hasPolicyColumn reports whether the access_policies table has a column
-// with the given name. Used to guard idempotent schema migrations.
-func (d *DB) hasPolicyColumn(name string) (bool, error) {
-	rows, err := d.db.Query("PRAGMA table_info(access_policies)")
+// createCompositeSchema creates all tables and indexes for the composite
+// secret-tree schema. Mirrors internal/database/sqlc/schema/001_main.sql.
+func (d *DB) createCompositeSchema(exec sqlExecer) error {
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS secret_nodes (
+			id          TEXT PRIMARY KEY,
+			kind        TEXT NOT NULL CHECK (kind IN ('secret', 'group')),
+			parent_id   TEXT REFERENCES secret_nodes(id) ON DELETE CASCADE,
+			name        TEXT NOT NULL,
+			value       BLOB,
+			created_at  DATETIME NOT NULL DEFAULT (datetime('now')),
+			updated_at  DATETIME NOT NULL DEFAULT (datetime('now')),
+			CHECK ((kind = 'secret' AND value IS NOT NULL)
+				OR (kind = 'group'  AND value IS NULL))
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_secret_nodes_parent ON secret_nodes(parent_id)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_secret_nodes_secret_name
+			ON secret_nodes(name) WHERE kind = 'secret'`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_secret_nodes_group_name
+			ON secret_nodes(parent_id, name) WHERE kind = 'group'`,
+		`CREATE TABLE IF NOT EXISTS access_policies (
+			id         TEXT PRIMARY KEY,
+			name       TEXT NOT NULL,
+			created_at DATETIME NOT NULL DEFAULT (datetime('now'))
+		)`,
+		`CREATE TABLE IF NOT EXISTS policy_patterns (
+			policy_id TEXT NOT NULL REFERENCES access_policies(id) ON DELETE CASCADE,
+			kind      TEXT NOT NULL CHECK (kind IN ('repository', 'ref', 'actor')),
+			pattern   TEXT NOT NULL,
+			PRIMARY KEY (policy_id, kind, pattern)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_policy_patterns_kind ON policy_patterns(kind)`,
+		`CREATE TABLE IF NOT EXISTS secret_node_policies (
+			node_id   TEXT NOT NULL REFERENCES secret_nodes(id)    ON DELETE CASCADE,
+			policy_id TEXT NOT NULL REFERENCES access_policies(id) ON DELETE CASCADE,
+			PRIMARY KEY (node_id, policy_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_secret_node_policies_policy ON secret_node_policies(policy_id)`,
+		`CREATE TABLE IF NOT EXISTS policy_precedence (
+			node_id       TEXT NOT NULL,
+			policy_id     TEXT NOT NULL,
+			depends_on_id TEXT NOT NULL,
+			PRIMARY KEY (node_id, policy_id, depends_on_id),
+			FOREIGN KEY (node_id, policy_id)     REFERENCES secret_node_policies(node_id, policy_id) ON DELETE CASCADE,
+			FOREIGN KEY (node_id, depends_on_id) REFERENCES secret_node_policies(node_id, policy_id) ON DELETE CASCADE,
+			CHECK (policy_id != depends_on_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_policy_precedence_dep ON policy_precedence(node_id, depends_on_id)`,
+	}
+	for _, s := range stmts {
+		if _, err := exec.ExecContext(context.Background(), s); err != nil {
+			return fmt.Errorf("exec schema stmt: %w", err)
+		}
+	}
+	return nil
+}
+
+// sqlExecer is the minimal interface we need for running CREATE TABLE etc.
+// against either a *sql.DB or *sql.Tx.
+type sqlExecer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+// legacySecret is the old `secrets`-table row shape joined with its
+// environment's project/environment columns. Used during migration.
+type legacySecret struct {
+	id          string
+	project     string
+	environment string
+	key         string
+	value       []byte
+}
+
+// legacyPolicy is the old `access_policies`-table row shape with JSON
+// pattern columns. Used during migration.
+type legacyPolicy struct {
+	id                 string
+	name               string
+	repositoryPatterns []string
+	refPatterns        []string
+	actorPatterns      []string
+	createdAt          time.Time
+}
+
+// migrateLegacyToComposite rewrites the old environments/secrets/policies
+// schema into the new composite secret-tree schema. It preserves every
+// secret as a loose root-level leaf (name-prefixed with its old
+// project/environment to satisfy the new globally-unique-secret-name
+// constraint) and every policy with its patterns normalized into
+// policy_patterns. Attachments are NOT carried over — the admin re-attaches
+// policies to nodes after upgrade.
+func (d *DB) migrateLegacyToComposite() error {
+	ctx := context.Background()
+
+	slog.Info("legacy schema detected — migrating to composite secret tree")
+
+	// Read out the old rows before touching the schema.
+	secrets, err := d.readLegacySecrets(ctx)
+	if err != nil {
+		return fmt.Errorf("read legacy secrets: %w", err)
+	}
+	policies, err := d.readLegacyPolicies(ctx)
+	if err != nil {
+		return fmt.Errorf("read legacy policies: %w", err)
+	}
+
+	// Foreign keys must be OFF while we drop the old tables and create new
+	// ones, because the old tables reference each other.
+	if _, err := d.db.ExecContext(ctx, "PRAGMA foreign_keys = OFF"); err != nil {
+		return err
+	}
+	defer d.db.ExecContext(ctx, "PRAGMA foreign_keys = ON")
+
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Drop the old tables.
+	for _, s := range []string{
+		"DROP TABLE IF EXISTS secrets",
+		"DROP TABLE IF EXISTS access_policies",
+		"DROP TABLE IF EXISTS environments",
+	} {
+		if _, err := tx.ExecContext(ctx, s); err != nil {
+			return fmt.Errorf("drop legacy table: %w", err)
+		}
+	}
+
+	// Create the new composite schema inside the transaction.
+	if err := d.createCompositeSchema(tx); err != nil {
+		return err
+	}
+
+	// Insert preserved secrets as loose root-level leaves.
+	now := time.Now().UTC()
+	for _, s := range secrets {
+		name := fmt.Sprintf("%s-%s-%s", s.project, s.environment, s.key)
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO secret_nodes (id, kind, parent_id, name, value, created_at, updated_at)
+			 VALUES (?, 'secret', NULL, ?, ?, ?, ?)`,
+			s.id, name, s.value, now, now,
+		); err != nil {
+			return fmt.Errorf("insert migrated secret %s: %w", name, err)
+		}
+	}
+
+	// Insert preserved policies and their normalized pattern rows.
+	for _, p := range policies {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO access_policies (id, name, created_at) VALUES (?, ?, ?)`,
+			p.id, p.name, p.createdAt,
+		); err != nil {
+			return fmt.Errorf("insert migrated policy %s: %w", p.name, err)
+		}
+		// Legacy empty arrays are NOT synthesized into '*' rows — the new
+		// semantics treat zero patterns of a kind as "matches nothing", and
+		// any policy that relied on the old "empty = wildcard" behavior will
+		// be visibly broken until the admin adds explicit patterns.
+		for _, pat := range p.repositoryPatterns {
+			if _, err := tx.ExecContext(ctx,
+				`INSERT INTO policy_patterns (policy_id, kind, pattern) VALUES (?, 'repository', ?)`,
+				p.id, pat,
+			); err != nil {
+				return fmt.Errorf("insert migrated repository pattern: %w", err)
+			}
+		}
+		for _, pat := range p.refPatterns {
+			if _, err := tx.ExecContext(ctx,
+				`INSERT INTO policy_patterns (policy_id, kind, pattern) VALUES (?, 'ref', ?)`,
+				p.id, pat,
+			); err != nil {
+				return fmt.Errorf("insert migrated ref pattern: %w", err)
+			}
+		}
+		for _, pat := range p.actorPatterns {
+			if _, err := tx.ExecContext(ctx,
+				`INSERT INTO policy_patterns (policy_id, kind, pattern) VALUES (?, 'actor', ?)`,
+				p.id, pat,
+			); err != nil {
+				return fmt.Errorf("insert migrated actor pattern: %w", err)
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	slog.Info("legacy migration complete",
+		"migrated_secrets", len(secrets),
+		"migrated_policies", len(policies),
+	)
+	return nil
+}
+
+// readLegacySecrets reads every row of the old secrets table, joined with
+// the environments table to recover the project/environment tuple.
+//
+// The old schema went through several iterations:
+//   - earliest: secrets table had project/environment TEXT columns directly
+//   - later: secrets had environment_id FK to environments, which had
+//     project/environment TEXT columns
+//
+// We handle both shapes so an upgrade from any old version works.
+func (d *DB) readLegacySecrets(ctx context.Context) ([]legacySecret, error) {
+	hasEnvID, err := columnExists(ctx, d.db, "secrets", "environment_id")
+	if err != nil {
+		return nil, err
+	}
+	var query string
+	if hasEnvID {
+		query = `SELECT s.id, e.project, e.environment, s.key, s.value
+			FROM secrets s
+			JOIN environments e ON e.id = s.environment_id`
+	} else {
+		query = `SELECT id, project, environment, key, value FROM secrets`
+	}
+	rows, err := d.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []legacySecret
+	for rows.Next() {
+		var s legacySecret
+		if err := rows.Scan(&s.id, &s.project, &s.environment, &s.key, &s.value); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// readLegacyPolicies reads every row of the old access_policies table and
+// decodes its JSON pattern columns. Handles both the plural pattern columns
+// (repository_patterns as JSON array) and the even older singular pattern
+// columns (repository_pattern as a single string).
+func (d *DB) readLegacyPolicies(ctx context.Context) ([]legacyPolicy, error) {
+	hasPlural, err := columnExists(ctx, d.db, "access_policies", "repository_patterns")
+	if err != nil {
+		return nil, err
+	}
+
+	var query string
+	if hasPlural {
+		query = `SELECT id, name, repository_patterns, ref_patterns, actor_patterns, created_at
+			FROM access_policies`
+	} else {
+		// Even older schema had singular columns.
+		query = `SELECT id, name, repository_pattern, ref_pattern, actor_pattern, created_at
+			FROM access_policies`
+	}
+	rows, err := d.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []legacyPolicy
+	for rows.Next() {
+		var (
+			id, name                  string
+			repoCol, refCol, actorCol string
+			createdAt                 time.Time
+		)
+		if err := rows.Scan(&id, &name, &repoCol, &refCol, &actorCol, &createdAt); err != nil {
+			return nil, err
+		}
+		lp := legacyPolicy{id: id, name: name, createdAt: createdAt}
+		if hasPlural {
+			lp.repositoryPatterns = decodeLegacyPatternList(repoCol)
+			lp.refPatterns = decodeLegacyPatternList(refCol)
+			lp.actorPatterns = decodeLegacyPatternList(actorCol)
+		} else {
+			if repoCol != "" {
+				lp.repositoryPatterns = []string{repoCol}
+			}
+			if refCol != "" {
+				lp.refPatterns = []string{refCol}
+			}
+			if actorCol != "" {
+				lp.actorPatterns = []string{actorCol}
+			}
+		}
+		out = append(out, lp)
+	}
+	return out, rows.Err()
+}
+
+// decodeLegacyPatternList decodes a legacy JSON-array column. An empty or
+// invalid value yields a nil slice, which the migration preserves as-is
+// (no wildcard synthesis — see migrateLegacyToComposite).
+func decodeLegacyPatternList(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var out []string
+	if err := json.Unmarshal([]byte(s), &out); err != nil {
+		slog.Warn("invalid legacy patterns JSON during migration; treating as empty", "raw", s, "error", err)
+		return nil
+	}
+	return out
+}
+
+// columnExists reports whether the given table has a column with the given
+// name. Uses PRAGMA table_info and returns false (without error) if the
+// table itself doesn't exist.
+func columnExists(ctx context.Context, db *sql.DB, table, column string) (bool, error) {
+	rows, err := db.QueryContext(ctx, fmt.Sprintf("PRAGMA table_info(%s)", table))
 	if err != nil {
 		return false, err
 	}
 	defer rows.Close()
-
 	for rows.Next() {
-		var cid int
-		var colName, typ string
-		var notnull int
-		var dflt sql.NullString
-		var pk int
-		if err := rows.Scan(&cid, &colName, &typ, &notnull, &dflt, &pk); err != nil {
+		var (
+			cid       int
+			name, typ string
+			notnull   int
+			dflt      sql.NullString
+			pk        int
+		)
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
 			return false, err
 		}
-		if colName == name {
+		if name == column {
 			return true, rows.Err()
 		}
 	}
 	return false, rows.Err()
-}
-
-func (d *DB) migrateActorPattern() error {
-	// On the new schema we store actor_patterns (plural JSON array);
-	// the legacy actor_pattern column is no longer needed.
-	if has, err := d.hasPolicyColumn("actor_patterns"); err != nil {
-		return err
-	} else if has {
-		return nil
-	}
-
-	if has, err := d.hasPolicyColumn("actor_pattern"); err != nil {
-		return err
-	} else if has {
-		return nil
-	}
-
-	_, err := d.db.Exec("ALTER TABLE access_policies ADD COLUMN actor_pattern TEXT NOT NULL DEFAULT '*'")
-	return err
-}
-
-// migratePolicyPatternLists replaces the singular repository_pattern,
-// ref_pattern, and actor_pattern columns with JSON-array columns
-// repository_patterns, ref_patterns, and actor_patterns. Existing values
-// are preserved as single-element JSON arrays. Idempotent.
-func (d *DB) migratePolicyPatternLists() error {
-	if has, err := d.hasPolicyColumn("repository_patterns"); err != nil {
-		return err
-	} else if has {
-		return nil
-	}
-
-	tx, err := d.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	stmts := []string{
-		`ALTER TABLE access_policies ADD COLUMN repository_patterns TEXT NOT NULL DEFAULT '[]'`,
-		`ALTER TABLE access_policies ADD COLUMN ref_patterns TEXT NOT NULL DEFAULT '["*"]'`,
-		`ALTER TABLE access_policies ADD COLUMN actor_patterns TEXT NOT NULL DEFAULT '["*"]'`,
-		`UPDATE access_policies SET
-			repository_patterns = json_array(repository_pattern),
-			ref_patterns = json_array(ref_pattern),
-			actor_patterns = json_array(actor_pattern)`,
-	}
-	for _, stmt := range stmts {
-		if _, err := tx.Exec(stmt); err != nil {
-			snippet := stmt
-			if len(snippet) > 40 {
-				snippet = snippet[:40]
-			}
-			return fmt.Errorf("exec %q: %w", snippet, err)
-		}
-	}
-
-	return tx.Commit()
-}
-
-// hasOldSchema returns true if the secrets table has a "project" column
-// (old schema) rather than "environment_id" (new schema).
-func (d *DB) hasOldSchema() (bool, error) {
-	rows, err := d.db.Query("PRAGMA table_info(secrets)")
-	if err != nil {
-		return false, err
-	}
-	defer rows.Close()
-
-	hasProject := false
-	hasAnyColumn := false
-	for rows.Next() {
-		hasAnyColumn = true
-		var cid int
-		var name, typ string
-		var notnull int
-		var dflt sql.NullString
-		var pk int
-		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
-			return false, err
-		}
-		if name == "project" {
-			hasProject = true
-		}
-	}
-	if !hasAnyColumn {
-		// Table doesn't exist yet — fresh install.
-		return false, rows.Err()
-	}
-	return hasProject, rows.Err()
-}
-
-// migrateToEnvironmentID converts the old schema (project/environment columns)
-// to the new schema (environment_id FK).
-func (d *DB) migrateToEnvironmentID() error {
-	// First, seed environments from existing data so every row has a match.
-	if err := d.seedEnvironments(); err != nil {
-		return fmt.Errorf("seed environments: %w", err)
-	}
-
-	tx, err := d.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	// Must disable FK checks during table recreation to avoid issues
-	// with dropping referenced tables.
-	if _, err := tx.Exec("PRAGMA foreign_keys = OFF"); err != nil {
-		return err
-	}
-
-	stmts := []string{
-		`CREATE TABLE secrets_new (
-			id TEXT PRIMARY KEY,
-			key TEXT NOT NULL,
-			value BLOB NOT NULL,
-			environment_id TEXT NOT NULL REFERENCES environments(id),
-			created_at DATETIME NOT NULL DEFAULT (datetime('now')),
-			updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
-			UNIQUE(key, environment_id)
-		)`,
-		`INSERT INTO secrets_new (id, key, value, environment_id, created_at, updated_at)
-			SELECT s.id, s.key, s.value, e.id, s.created_at, s.updated_at
-			FROM secrets s
-			JOIN environments e ON e.project = s.project AND e.environment = s.environment`,
-		`DROP TABLE secrets`,
-		`ALTER TABLE secrets_new RENAME TO secrets`,
-		`CREATE INDEX idx_secrets_env_id ON secrets(environment_id)`,
-
-		`CREATE TABLE access_policies_new (
-			id TEXT PRIMARY KEY,
-			name TEXT NOT NULL,
-			repository_pattern TEXT NOT NULL,
-			ref_pattern TEXT NOT NULL DEFAULT '*',
-			actor_pattern TEXT NOT NULL DEFAULT '*',
-			environment_id TEXT NOT NULL REFERENCES environments(id),
-			created_at DATETIME NOT NULL DEFAULT (datetime('now'))
-		)`,
-		`INSERT INTO access_policies_new (id, name, repository_pattern, ref_pattern, actor_pattern, environment_id, created_at)
-			SELECT p.id, p.name, p.repository_pattern, p.ref_pattern, '*', e.id, p.created_at
-			FROM access_policies p
-			JOIN environments e ON e.project = p.project AND e.environment = p.environment`,
-		`DROP TABLE access_policies`,
-		`ALTER TABLE access_policies_new RENAME TO access_policies`,
-		`CREATE INDEX idx_policies_env_id ON access_policies(environment_id)`,
-	}
-
-	for _, stmt := range stmts {
-		if _, err := tx.Exec(stmt); err != nil {
-			return fmt.Errorf("exec %q: %w", stmt[:40], err)
-		}
-	}
-
-	if _, err := tx.Exec("PRAGMA foreign_keys = ON"); err != nil {
-		return err
-	}
-
-	return tx.Commit()
-}
-
-func (d *DB) seedEnvironments() error {
-	// Raw SQL because this queries OLD schema columns (project, environment)
-	// that only exist before migration to environment_id FK.
-	rows, err := d.db.Query(`
-		SELECT DISTINCT project, environment FROM secrets
-		UNION
-		SELECT DISTINCT project, environment FROM access_policies
-	`)
-	if err != nil {
-		return fmt.Errorf("query existing project/env pairs: %w", err)
-	}
-	defer rows.Close()
-
-	ctx := context.Background()
-	for rows.Next() {
-		var project, environment string
-		if err := rows.Scan(&project, &environment); err != nil {
-			return fmt.Errorf("scan project/env pair: %w", err)
-		}
-		err := d.q.InsertEnvironmentIgnore(ctx, sqlcdb.InsertEnvironmentIgnoreParams{
-			ID:          uuid.New().String(),
-			Project:     project,
-			Environment: environment,
-		})
-		if err != nil {
-			return fmt.Errorf("seed environment %s/%s: %w", project, environment, err)
-		}
-	}
-	return rows.Err()
 }

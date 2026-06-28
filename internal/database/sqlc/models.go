@@ -10,13 +10,9 @@ import (
 )
 
 type AccessPolicy struct {
-	ID                 string
-	Name               string
-	RepositoryPatterns string
-	RefPatterns        string
-	ActorPatterns      string
-	EnvironmentID      string
-	CreatedAt          time.Time
+	ID        string
+	Name      string
+	CreatedAt time.Time
 }
 
 type AuditLog struct {
@@ -30,28 +26,29 @@ type AuditLog struct {
 	Details      string
 }
 
-type Environment struct {
-	ID          string
-	Project     string
-	Environment string
-	CreatedAt   time.Time
+type PolicyPattern struct {
+	PolicyID string
+	Kind     string
+	Pattern  string
 }
 
-type MachineToken struct {
-	ID            string
-	Name          string
-	TokenHash     string
-	TokenPrefix   string
-	EnvironmentID string
-	CreatedAt     time.Time
-	LastUsedAt    sql.NullTime
+type PolicyPrecedence struct {
+	NodeID      string
+	PolicyID    string
+	DependsOnID string
 }
 
-type Secret struct {
-	ID            string
-	Key           string
-	Value         []byte
-	EnvironmentID string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+type SecretNode struct {
+	ID        string
+	Kind      string
+	ParentID  sql.NullString
+	Name      string
+	Value     []byte
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+type SecretNodePolicy struct {
+	NodeID   string
+	PolicyID string
 }

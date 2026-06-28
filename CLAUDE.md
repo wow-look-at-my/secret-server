@@ -15,32 +15,19 @@ This runs mod tidy, vet, tests with coverage, and builds. Do not use bare `go` c
 Two path prefixes for Cloudflare Access:
 
 - `/admin/*` — protected (API + web UI)
-- `/github/*` — bypassed (GitHub Actions OIDC **or** machine token)
+- `/github/*` — bypassed (GitHub Actions OIDC)
 - `/health` — not routed through CF Access (Docker/uptime checks)
 
 Route constants are in `internal/handlers/routes.go`. Templates use `{{prefix}}` to
 reference the admin UI prefix.
 
-- **Two credential types, one vend endpoint**: `GET /github/v1/secrets` accepts
-  both a GitHub Actions OIDC JWT (policy-matched on repo/ref/actor) and a
-  **machine token** (`sst_…`, bound to one environment). `PublicHandler.fetchSecrets`
-  inspects the bearer token — the `database.MachineTokenPrefix` routes it to
-  `fetchSecretsMachine`, otherwise it's validated as OIDC. Sharing the route means
-  no extra CF Access bypass path. Machine tokens are for clients that can't present
-  an OIDC token (e.g. webhook-runner hooks). See README "Machine Tokens".
-- **Machine tokens** live in the `machine_tokens` table (`internal/database/machine_tokens.go`):
-  only the SHA-256 hash is stored, the plaintext (`sst_` + base64url random) is
-  returned once at creation. Admin CRUD is in `admin.go`/`ui_machine_tokens.go`
-  (`/admin/v1/machine-tokens`, and the **Machine Tokens** UI page). The token *is*
-  the grant — it vends every secret in its environment, no policy match — so scope
-  by environment. Every vend is audited as `secret.access` (actor type
-  `machine_token`).
-
 - **Encryption at rest**: Secrets are AES-256-GCM encrypted in SQLite, base64-encoded. Decrypted only in memory on retrieval.
-- **Managed environments**: Project/environment pairs are first-class entities with UUID primary keys. Secrets and policies reference them by `environment_id` (FK), not by string tuple. Environments can be renamed without updating referencing rows. Auto-migrated from legacy string-column schema on upgrade.
-- **Policy-based access**: Each policy holds lists of glob patterns for repository name, git ref, and actor. A request matches a policy iff the repo matches any repo-pattern AND the ref matches any ref-pattern AND the actor matches any actor-pattern. Patterns are stored as JSON arrays in `repository_patterns` / `ref_patterns` / `actor_patterns` TEXT columns. An empty list acts as a wildcard. Legacy single-pattern columns are auto-migrated to single-element JSON arrays on upgrade.
+- **Composite secret tree**: Secrets live in a `secret_nodes` table as either `secret` leaves or `group` composites, forming an arbitrary-depth tree. The `ISecretNode` interface exposes uniform `ID() / Name() / ParentID() / Children()` methods — a leaf's `Children()` returns nil so tree walks don't need type switches. Secret names are **globally unique** across the whole server (partial unique index); group names are unique within their parent. The global-uniqueness invariant is what lets the public API return `{name: value}` without collision handling.
+- **Policy-based access**: Each policy is a pure pattern-match rule with normalized `policy_patterns(policy_id, kind, pattern)` rows for the three kinds (`repository`, `ref`, `actor`). A request matches a policy iff one pattern of each kind matches via SQLite's native `GLOB` operator — matching runs entirely inside SQLite, no Go-side loops or JSON parsing. A policy with zero patterns of a kind matches nothing for that kind (no implicit wildcard; write `*` explicitly).
+- **Attach + precedence**: Policies are attached to nodes via the unordered-set `secret_node_policies` junction table. A policy attached to a group grants access to every descendant leaf (inheritance via a recursive CTE in the public API hot path). Optional `policy_precedence` rows describe directed "A must evaluate before B" edges per node; `DB.ListNodePolicies` returns the attached set in topological order via a Kahn's-algorithm sort, tie-broken by name. Cycle detection runs in Go (DFS) at insert time because SQLite can't enforce it without triggers. Matching is still pure OR — precedence only affects UI display and any future override/deny resolver.
+- **Legacy migration**: On upgrade from the old `environments`/`secrets`/`access_policies` schema, every old secret is flattened into a single root-level leaf with name `<project>-<environment>-<key>` (prefix required to satisfy global uniqueness). No groups are created; the admin reorganizes the tree after upgrade. Policies are preserved with patterns normalized into `policy_patterns`, but attachments are NOT carried over and legacy empty-list-as-wildcard is NOT synthesized — the admin re-attaches and fixes any relying policies as a conscious authorization review.
 - **Pure-Go SQLite**: Uses `modernc.org/sqlite` (no CGO required). CGO is disabled in the build.
-- **sqlc codegen**: SQL queries live in `internal/database/sqlc/queries/*.sql`. Run `sqlc generate` to regenerate Go code after modifying queries. Never edit files in `internal/database/sqlc/` directly.
+- **sqlc codegen**: SQL queries live in `internal/database/sqlc/queries/*.sql`. Run `sqlc generate` to regenerate Go code after modifying queries. Never edit files in `internal/database/sqlc/` directly. Exception: `MatchingPolicyIDs` is hand-rolled raw SQL in `internal/database/policies.go` because sqlc v1.28.0 has an off-by-N bug that truncates the tail of generated query strings containing SQLite `?` placeholders.
 
 ## Key packages
 
