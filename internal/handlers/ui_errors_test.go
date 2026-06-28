@@ -216,7 +216,7 @@ func TestUIUpdatePolicyNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, rr.Code)
 }
 
-func TestUIUpdatePolicyInvalidPatterns(t *testing.T) {
+func TestUIUpdatePolicyEmptyRepoPatternsAllowed(t *testing.T) {
 	env := setup(t)
 	p, _ := env.db.CreatePolicy("p", []string{"*"}, []string{"*"}, []string{"*"})
 
@@ -224,13 +224,18 @@ func TestUIUpdatePolicyInvalidPatterns(t *testing.T) {
 	mux := chi.NewRouter()
 	h.Register(mux)
 
+	// Clearing a policy's repository patterns is allowed; the policy is kept
+	// but matches nothing (fail-closed) until patterns are re-added.
 	form := "name=x&repository_patterns=&ref_patterns=*&actor_patterns=*"
 	req := httptest.NewRequest("POST", "/admin/policies/"+p.ID, strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
-	assert.Equal(t, http.StatusOK, rr.Code)
-	assert.Contains(t, rr.Body.String(), "at least one repository pattern")
+	assert.Equal(t, http.StatusSeeOther, rr.Code)
+
+	got, _ := env.db.GetPolicy(p.ID)
+	require.NotNil(t, got)
+	assert.Empty(t, got.RepositoryPatterns)
 }
 
 func TestUIDeletePolicyNotFound(t *testing.T) {
