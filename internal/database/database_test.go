@@ -325,6 +325,21 @@ func TestMatchingPolicyIDsEmptyKindMatchesNothing(t *testing.T) {
 	assert.Equal(t, 0, len(ids))
 }
 
+func TestCreateEmptyPolicyMatchesNothing(t *testing.T) {
+	db := testDB(t)
+	ctx := context.Background()
+
+	// A policy with no patterns of ANY kind is creatable and fail-closed:
+	// every kind's inner JOIN yields no rows, so it can never match a claim.
+	p, err := db.CreatePolicy("empty", nil, nil, nil)
+	require.Nil(t, err)
+	require.NotNil(t, p)
+
+	ids, err := db.MatchingPolicyIDs(ctx, "myorg/repo", "refs/heads/main", "anyone")
+	require.Nil(t, err)
+	assert.Equal(t, 0, len(ids))
+}
+
 func TestMatchingPolicyIDsActorFilter(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()

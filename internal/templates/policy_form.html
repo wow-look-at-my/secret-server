@@ -17,9 +17,9 @@
 
     <div class="form-group">
         <label for="repository_patterns">Repository Patterns</label>
-        <textarea id="repository_patterns" name="repository_patterns" required rows="3"
+        <textarea id="repository_patterns" name="repository_patterns" rows="3"
             placeholder="wow-look-at-my/*&#10;owner/repo">{{if not .IsNew}}{{joinLines .Policy.RepositoryPatterns}}{{end}}</textarea>
-        <div class="hint">One SQLite GLOB pattern per line. A request is allowed if the repository matches any of these. At least one pattern is required.</div>
+        <div class="hint">One SQLite GLOB pattern per line. A request is allowed if the repository matches any of these. Leave blank to create the policy with no repository patterns &mdash; an empty policy matches nothing (grants no access) until you add patterns, so it is safe to fill in later.</div>
     </div>
 
     <div class="form-group">
