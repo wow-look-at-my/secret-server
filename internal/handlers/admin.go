@@ -68,6 +68,11 @@ func (h *AdminHandler) Register(r chi.Router) {
 	r.Put(p+"/policies/{id}", h.updatePolicy)
 	r.Delete(p+"/policies/{id}", h.deletePolicy)
 	r.Get(p+"/policies/{id}/nodes", h.listPolicyNodes)
+
+	// Machine tokens — bearer credentials for non-Actions clients, bound to a policy.
+	r.Get(p+"/machine-tokens", h.listMachineTokens)
+	r.Post(p+"/machine-tokens", h.createMachineToken)
+	r.Delete(p+"/machine-tokens/{id}", h.deleteMachineToken)
 }
 
 func adminActor(r *http.Request) string {
@@ -609,4 +614,85 @@ func (h *AdminHandler) listPolicyNodes(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(views)
+}
+
+// --- Machine tokens ---
+
+func (h *AdminHandler) listMachineTokens(w http.ResponseWriter, r *http.Request) {
+	tokens, err := h.db.ListMachineTokens()
+	if err != nil {
+		slog.Error("list machine tokens failed", "error", err)
+		http.Error(w, `{"error":"failed to list machine tokens"}`, http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(tokens)
+}
+
+func (h *AdminHandler) createMachineToken(w http.ResponseWriter, r *http.Request) {
+	if !requireJSON(w, r) {
+		return
+	}
+	var req struct {
+		Name     string `json:"name"`
+		PolicyID string `json:"policy_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+	if req.Name == "" || req.PolicyID == "" {
+		http.Error(w, `{"error":"name and policy_id are required"}`, http.StatusBadRequest)
+		return
+	}
+	if !validUUID(req.PolicyID) {
+		http.Error(w, `{"error":"policy_id must be a valid UUID"}`, http.StatusBadRequest)
+		return
+	}
+
+	policy, err := h.db.GetPolicy(req.PolicyID)
+	if err != nil {
+		http.Error(w, `{"error":"failed to look up policy"}`, http.StatusInternalServerError)
+		return
+	}
+	if policy == nil {
+		http.Error(w, `{"error":"policy not found"}`, http.StatusBadRequest)
+		return
+	}
+
+	token, rec, err := h.db.CreateMachineToken(req.Name, req.PolicyID)
+	if err != nil {
+		slog.Error("create machine token failed", "error", err)
+		http.Error(w, `{"error":"failed to create machine token"}`, http.StatusInternalServerError)
+		return
+	}
+
+	details, _ := json.Marshal(map[string]string{"name": req.Name, "policy": policy.Name})
+	if err := h.audit.CreateEntry("machine_token.create", "admin", adminActor(r), "machine_token", rec.ID, string(details)); err != nil {
+		slog.Error("audit log failed", "error", err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	// The plaintext token is returned exactly once — only its hash is stored.
+	json.NewEncoder(w).Encode(map[string]string{"id": rec.ID, "token": token})
+}
+
+func (h *AdminHandler) deleteMachineToken(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if err := h.db.DeleteMachineToken(id); err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			http.Error(w, `{"error":"machine token not found"}`, http.StatusNotFound)
+			return
+		}
+		slog.Error("delete machine token failed", "error", err)
+		http.Error(w, `{"error":"failed to delete machine token"}`, http.StatusInternalServerError)
+		return
+	}
+
+	if err := h.audit.CreateEntry("machine_token.delete", "admin", adminActor(r), "machine_token", id, "{}"); err != nil {
+		slog.Error("audit log failed", "error", err)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
