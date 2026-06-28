@@ -171,11 +171,12 @@ type legacyPolicy struct {
 
 // migrateLegacyToComposite rewrites the old environments/secrets/policies
 // schema into the new composite secret-tree schema. It preserves every
-// secret as a loose root-level leaf (name-prefixed with its old
-// project/environment to satisfy the new globally-unique-secret-name
-// constraint) and every policy with its patterns normalized into
-// policy_patterns. Attachments are NOT carried over — the admin re-attaches
-// policies to nodes after upgrade.
+// secret as a loose root-level leaf keeping its bare legacy key as the name
+// (so consumers that reference the key — e.g. an env-var name — keep
+// working), disambiguating only on an actual key collision. Every policy is
+// preserved with its patterns normalized into policy_patterns. Attachments
+// are NOT carried over — the admin re-attaches policies to nodes after
+// upgrade.
 func (d *DB) migrateLegacyToComposite() error {
 	ctx := context.Background()
 
@@ -220,10 +221,25 @@ func (d *DB) migrateLegacyToComposite() error {
 		return err
 	}
 
-	// Insert preserved secrets as loose root-level leaves.
+	// Insert preserved secrets as loose root-level leaves. The name is the
+	// bare legacy key — i.e. the exact string consumers already reference
+	// (the env-var name a workflow expects). The old schema allowed the same
+	// key under different project/environment pairs, so only when two rows
+	// actually collide on the key do we disambiguate by appending the old
+	// project/environment (and a counter if needed). The overwhelming common
+	// case — a unique key — keeps its clean name.
 	now := time.Now().UTC()
+	usedNames := make(map[string]bool, len(secrets))
 	for _, s := range secrets {
-		name := fmt.Sprintf("%s-%s-%s", s.project, s.environment, s.key)
+		name := s.key
+		if usedNames[name] {
+			base := fmt.Sprintf("%s-%s-%s", s.key, s.project, s.environment)
+			name = base
+			for i := 2; usedNames[name]; i++ {
+				name = fmt.Sprintf("%s-%d", base, i)
+			}
+		}
+		usedNames[name] = true
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO secret_nodes (id, kind, parent_id, name, value, created_at, updated_at)
 			 VALUES (?, 'secret', NULL, ?, ?, ?, ?)`,
@@ -296,13 +312,18 @@ func (d *DB) readLegacySecrets(ctx context.Context) ([]legacySecret, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Ordered so that name-collision disambiguation (see
+	// migrateLegacyToComposite) is deterministic: the first row for a given
+	// key keeps the bare name, later ones get suffixed.
 	var query string
 	if hasEnvID {
 		query = `SELECT s.id, e.project, e.environment, s.key, s.value
 			FROM secrets s
-			JOIN environments e ON e.id = s.environment_id`
+			JOIN environments e ON e.id = s.environment_id
+			ORDER BY s.key, e.project, e.environment`
 	} else {
-		query = `SELECT id, project, environment, key, value FROM secrets`
+		query = `SELECT id, project, environment, key, value FROM secrets
+			ORDER BY key, project, environment`
 	}
 	rows, err := d.db.QueryContext(ctx, query)
 	if err != nil {
