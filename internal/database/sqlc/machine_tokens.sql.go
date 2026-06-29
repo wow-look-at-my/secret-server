@@ -37,8 +37,8 @@ func (q *Queries) CountMachineTokens(ctx context.Context) (int64, error) {
 }
 
 const createMachineToken = `-- name: CreateMachineToken :exec
-INSERT INTO machine_tokens (id, name, token_hash, token_prefix, created_at)
-VALUES (?, ?, ?, ?, ?)
+INSERT INTO machine_tokens (id, name, token_hash, token_prefix, policy_id, created_at)
+VALUES (?, ?, ?, ?, ?, ?)
 `
 
 type CreateMachineTokenParams struct {
@@ -46,6 +46,7 @@ type CreateMachineTokenParams struct {
 	Name        string
 	TokenHash   string
 	TokenPrefix string
+	PolicyID    sql.NullString
 	CreatedAt   time.Time
 }
 
@@ -55,6 +56,7 @@ func (q *Queries) CreateMachineToken(ctx context.Context, arg CreateMachineToken
 		arg.Name,
 		arg.TokenHash,
 		arg.TokenPrefix,
+		arg.PolicyID,
 		arg.CreatedAt,
 	)
 	return err
@@ -78,15 +80,18 @@ func (q *Queries) DeleteTokenNodes(ctx context.Context, tokenID string) error {
 }
 
 const getMachineToken = `-- name: GetMachineToken :one
-SELECT id, name, token_prefix, created_at, last_used_at
-FROM machine_tokens
-WHERE id = ?
+SELECT t.id, t.name, t.token_prefix, t.policy_id, p.name AS policy_name, t.created_at, t.last_used_at
+FROM machine_tokens t
+LEFT JOIN access_policies p ON p.id = t.policy_id
+WHERE t.id = ?
 `
 
 type GetMachineTokenRow struct {
 	ID          string
 	Name        string
 	TokenPrefix string
+	PolicyID    sql.NullString
+	PolicyName  sql.NullString
 	CreatedAt   time.Time
 	LastUsedAt  sql.NullTime
 }
@@ -98,6 +103,8 @@ func (q *Queries) GetMachineToken(ctx context.Context, id string) (GetMachineTok
 		&i.ID,
 		&i.Name,
 		&i.TokenPrefix,
+		&i.PolicyID,
+		&i.PolicyName,
 		&i.CreatedAt,
 		&i.LastUsedAt,
 	)
@@ -105,15 +112,18 @@ func (q *Queries) GetMachineToken(ctx context.Context, id string) (GetMachineTok
 }
 
 const getMachineTokenByHash = `-- name: GetMachineTokenByHash :one
-SELECT id, name, token_prefix, created_at, last_used_at
-FROM machine_tokens
-WHERE token_hash = ?
+SELECT t.id, t.name, t.token_prefix, t.policy_id, p.name AS policy_name, t.created_at, t.last_used_at
+FROM machine_tokens t
+LEFT JOIN access_policies p ON p.id = t.policy_id
+WHERE t.token_hash = ?
 `
 
 type GetMachineTokenByHashRow struct {
 	ID          string
 	Name        string
 	TokenPrefix string
+	PolicyID    sql.NullString
+	PolicyName  sql.NullString
 	CreatedAt   time.Time
 	LastUsedAt  sql.NullTime
 }
@@ -125,6 +135,8 @@ func (q *Queries) GetMachineTokenByHash(ctx context.Context, tokenHash string) (
 		&i.ID,
 		&i.Name,
 		&i.TokenPrefix,
+		&i.PolicyID,
+		&i.PolicyName,
 		&i.CreatedAt,
 		&i.LastUsedAt,
 	)
@@ -132,15 +144,18 @@ func (q *Queries) GetMachineTokenByHash(ctx context.Context, tokenHash string) (
 }
 
 const listMachineTokens = `-- name: ListMachineTokens :many
-SELECT id, name, token_prefix, created_at, last_used_at
-FROM machine_tokens
-ORDER BY created_at DESC
+SELECT t.id, t.name, t.token_prefix, t.policy_id, p.name AS policy_name, t.created_at, t.last_used_at
+FROM machine_tokens t
+LEFT JOIN access_policies p ON p.id = t.policy_id
+ORDER BY t.created_at DESC
 `
 
 type ListMachineTokensRow struct {
 	ID          string
 	Name        string
 	TokenPrefix string
+	PolicyID    sql.NullString
+	PolicyName  sql.NullString
 	CreatedAt   time.Time
 	LastUsedAt  sql.NullTime
 }
@@ -158,6 +173,8 @@ func (q *Queries) ListMachineTokens(ctx context.Context) ([]ListMachineTokensRow
 			&i.ID,
 			&i.Name,
 			&i.TokenPrefix,
+			&i.PolicyID,
+			&i.PolicyName,
 			&i.CreatedAt,
 			&i.LastUsedAt,
 		); err != nil {
@@ -209,6 +226,20 @@ func (q *Queries) ListTokenNodes(ctx context.Context, tokenID string) ([]ListTok
 		return nil, err
 	}
 	return items, nil
+}
+
+const setMachineTokenPolicy = `-- name: SetMachineTokenPolicy :exec
+UPDATE machine_tokens SET policy_id = ? WHERE id = ?
+`
+
+type SetMachineTokenPolicyParams struct {
+	PolicyID sql.NullString
+	ID       string
+}
+
+func (q *Queries) SetMachineTokenPolicy(ctx context.Context, arg SetMachineTokenPolicyParams) error {
+	_, err := q.db.ExecContext(ctx, setMachineTokenPolicy, arg.PolicyID, arg.ID)
+	return err
 }
 
 const touchMachineToken = `-- name: TouchMachineToken :exec

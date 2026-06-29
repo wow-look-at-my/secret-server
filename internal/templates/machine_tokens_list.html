@@ -16,6 +16,7 @@
             <th>Name</th>
             <th>Token</th>
             <th>Secrets</th>
+            <th>Policy</th>
             <th>Created</th>
             <th>Last Used</th>
             <th>Actions</th>
@@ -27,6 +28,7 @@
             <td>{{.Name}}</td>
             <td><code>{{.TokenPrefix}}…</code></td>
             <td>{{range .Nodes}}<span class="chip kind-{{.Kind}}" title="{{.Kind}}">{{.Name}}</span> {{else}}<span class="empty">none</span>{{end}}</td>
+            <td>{{if .PolicyName}}{{.PolicyName}}{{else}}<span class="empty">—</span>{{end}}</td>
             <td>{{.CreatedAt.Format "2006-01-02 15:04"}}</td>
             <td>{{if .LastUsedAt}}{{.LastUsedAt.Format "2006-01-02 15:04"}}{{else}}<span class="empty">never</span>{{end}}</td>
             <td>

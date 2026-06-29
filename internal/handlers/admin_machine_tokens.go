@@ -21,11 +21,13 @@ type machineTokenView struct {
 	Nodes []database.TokenNode `json:"nodes"`
 }
 
-// machineTokenRequest is the JSON body for create/update. node_ids are
-// secret-tree node IDs — a leaf grants that secret, a group grants its subtree.
+// machineTokenRequest is the JSON body for create/update. A token grants the
+// union of its direct node_ids (a leaf grants that secret, a group its subtree)
+// and its optional bound policy_id (empty = no policy).
 type machineTokenRequest struct {
-	Name    string   `json:"name"`
-	NodeIDs []string `json:"node_ids"`
+	Name     string   `json:"name"`
+	PolicyID string   `json:"policy_id"`
+	NodeIDs  []string `json:"node_ids"`
 }
 
 // validNodeIDs reports whether every id is a well-formed UUID.
@@ -36,6 +38,19 @@ func validNodeIDs(ids []string) bool {
 		}
 	}
 	return true
+}
+
+// optionalPolicyID validates the request's policy_id and returns it as an
+// optional pointer (nil when empty). ok is false on a malformed (non-UUID) id.
+func (req machineTokenRequest) optionalPolicyID() (policy *string, ok bool) {
+	if req.PolicyID == "" {
+		return nil, true
+	}
+	if !validUUID(req.PolicyID) {
+		return nil, false
+	}
+	id := req.PolicyID
+	return &id, true
 }
 
 func (h *AdminHandler) listMachineTokens(w http.ResponseWriter, r *http.Request) {
@@ -76,11 +91,16 @@ func (h *AdminHandler) createMachineToken(w http.ResponseWriter, r *http.Request
 		http.Error(w, `{"error":"node_ids must be valid UUIDs"}`, http.StatusBadRequest)
 		return
 	}
+	policyID, ok := req.optionalPolicyID()
+	if !ok {
+		http.Error(w, `{"error":"policy_id must be a valid UUID"}`, http.StatusBadRequest)
+		return
+	}
 
-	token, rec, err := h.db.CreateMachineToken(req.Name, req.NodeIDs)
+	token, rec, err := h.db.CreateMachineToken(req.Name, policyID, req.NodeIDs)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
-			http.Error(w, `{"error":"one or more secrets not found"}`, http.StatusBadRequest)
+			http.Error(w, `{"error":"the policy or one or more secrets were not found"}`, http.StatusBadRequest)
 			return
 		}
 		slog.Error("create machine token failed", "error", err)
@@ -88,7 +108,7 @@ func (h *AdminHandler) createMachineToken(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	details, _ := json.Marshal(map[string]any{"name": req.Name, "node_count": len(req.NodeIDs)})
+	details, _ := json.Marshal(map[string]any{"name": req.Name, "policy_id": req.PolicyID, "node_count": len(req.NodeIDs)})
 	if err := h.audit.CreateEntry("machine_token.create", "admin", adminActor(r), "machine_token", rec.ID, string(details)); err != nil {
 		slog.Error("audit log failed", "error", err)
 	}
@@ -117,6 +137,11 @@ func (h *AdminHandler) updateMachineToken(w http.ResponseWriter, r *http.Request
 		http.Error(w, `{"error":"node_ids must be valid UUIDs"}`, http.StatusBadRequest)
 		return
 	}
+	policyID, ok := req.optionalPolicyID()
+	if !ok {
+		http.Error(w, `{"error":"policy_id must be a valid UUID"}`, http.StatusBadRequest)
+		return
+	}
 	tok, err := h.db.GetMachineToken(id)
 	if err != nil {
 		slog.Error("look up machine token failed", "error", err)
@@ -127,16 +152,16 @@ func (h *AdminHandler) updateMachineToken(w http.ResponseWriter, r *http.Request
 		http.Error(w, `{"error":"machine token not found"}`, http.StatusNotFound)
 		return
 	}
-	if err := h.db.SetTokenNodes(id, req.NodeIDs); err != nil {
+	if err := h.db.UpdateMachineToken(id, policyID, req.NodeIDs); err != nil {
 		if errors.Is(err, database.ErrNotFound) {
-			http.Error(w, `{"error":"one or more secrets not found"}`, http.StatusBadRequest)
+			http.Error(w, `{"error":"the policy or one or more secrets were not found"}`, http.StatusBadRequest)
 			return
 		}
 		slog.Error("update machine token failed", "error", err)
 		http.Error(w, `{"error":"failed to update machine token"}`, http.StatusInternalServerError)
 		return
 	}
-	details, _ := json.Marshal(map[string]any{"node_count": len(req.NodeIDs)})
+	details, _ := json.Marshal(map[string]any{"policy_id": req.PolicyID, "node_count": len(req.NodeIDs)})
 	if err := h.audit.CreateEntry("machine_token.update", "admin", adminActor(r), "machine_token", id, string(details)); err != nil {
 		slog.Error("audit log failed", "error", err)
 	}

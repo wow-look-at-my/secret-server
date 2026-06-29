@@ -29,14 +29,34 @@ const machineTokenRandomBytes = 32
 // MachineToken is a stored machine token. The secret token itself is never
 // persisted — only its SHA-256 hash — so it cannot be recovered from the DB;
 // it is shown to the operator exactly once, at creation. A token grants secrets
-// by attaching directly to secret-tree nodes (see machine_token_nodes); it has
-// no policy binding.
+// two ways, either or both: by attaching directly to secret-tree nodes (see
+// machine_token_nodes) and/or via an optional bound policy (PolicyID).
 type MachineToken struct {
 	ID          string
 	Name        string
-	TokenPrefix string // first chars of the token, for display ("sst_ab12…")
+	TokenPrefix string  // first chars of the token, for display ("sst_ab12…")
+	PolicyID    *string // optional bound policy; nil when the token grants only via direct attachments
+	PolicyName  *string // name of the bound policy (nil if unbound)
 	CreatedAt   time.Time
 	LastUsedAt  *time.Time // nil if never used
+}
+
+// ptrToNullString maps an optional policy id to a nullable column value,
+// treating both nil and "" as "no policy".
+func ptrToNullString(s *string) sql.NullString {
+	if s == nil || *s == "" {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: *s, Valid: true}
+}
+
+// nullStringToPtr maps a nullable column value back to an optional string.
+func nullStringToPtr(ns sql.NullString) *string {
+	if !ns.Valid {
+		return nil
+	}
+	s := ns.String
+	return &s
 }
 
 // TokenNode is a secret-tree node attached to a machine token. A "group" grants
@@ -72,12 +92,16 @@ func generateMachineToken() (token, hash, prefix string, err error) {
 	return token, hash, prefix, nil
 }
 
-// CreateMachineToken mints a token, attaches it to the given secret-tree nodes,
-// and stores only its hash. Creation and attachment happen in one transaction,
-// so a token never half-exists. The returned plaintext token is the only time
-// it is ever available — the caller must surface it to the operator and then
-// discard it. An unknown node ID fails the whole create with ErrNotFound.
-func (d *DB) CreateMachineToken(name string, nodeIDs []string) (token string, rec *MachineToken, err error) {
+// CreateMachineToken mints a token granting the given direct node attachments
+// and/or an optional bound policy (policyID nil/"" = no policy), and stores only
+// its hash. Creation, the policy binding, and the attachments happen in one
+// transaction, so a token never half-exists. The returned plaintext token is the
+// only time it is ever available — the caller must surface it and then discard
+// it. An unknown node ID or policy ID fails the whole create with ErrNotFound.
+func (d *DB) CreateMachineToken(name string, policyID *string, nodeIDs []string) (token string, rec *MachineToken, err error) {
+	if err := d.ensurePolicyExists(policyID); err != nil {
+		return "", nil, err
+	}
 	token, hash, prefix, err := generateMachineToken()
 	if err != nil {
 		return "", nil, err
@@ -98,6 +122,7 @@ func (d *DB) CreateMachineToken(name string, nodeIDs []string) (token string, re
 		Name:        name,
 		TokenHash:   hash,
 		TokenPrefix: prefix,
+		PolicyID:    ptrToNullString(policyID),
 		CreatedAt:   now,
 	}); err != nil {
 		return "", nil, fmt.Errorf("insert machine token: %w", err)
@@ -112,8 +137,56 @@ func (d *DB) CreateMachineToken(name string, nodeIDs []string) (token string, re
 		ID:          id,
 		Name:        name,
 		TokenPrefix: prefix,
+		PolicyID:    nullStringToPtr(ptrToNullString(policyID)),
 		CreatedAt:   now,
 	}, nil
+}
+
+// UpdateMachineToken replaces a token's bound policy and direct node attachments
+// with exactly the given values, in one transaction. policyID nil/"" unbinds any
+// policy. An unknown node or policy ID fails the whole update with ErrNotFound,
+// leaving the prior grant untouched.
+func (d *DB) UpdateMachineToken(id string, policyID *string, nodeIDs []string) error {
+	if err := d.ensurePolicyExists(policyID); err != nil {
+		return err
+	}
+	ctx := context.Background()
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // rolled back unless Commit succeeds
+	q := d.q.WithTx(tx)
+
+	if err := q.SetMachineTokenPolicy(ctx, sqlcdb.SetMachineTokenPolicyParams{
+		PolicyID: ptrToNullString(policyID),
+		ID:       id,
+	}); err != nil {
+		return fmt.Errorf("set token policy: %w", err)
+	}
+	if err := q.DeleteTokenNodes(ctx, id); err != nil {
+		return fmt.Errorf("clear token nodes: %w", err)
+	}
+	if err := attachNodesTx(ctx, q, id, nodeIDs); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// ensurePolicyExists returns ErrNotFound if a non-empty policy id is given but
+// no such policy exists. A nil/"" id (no policy) always passes.
+func (d *DB) ensurePolicyExists(policyID *string) error {
+	if policyID == nil || *policyID == "" {
+		return nil
+	}
+	pol, err := d.GetPolicy(*policyID)
+	if err != nil {
+		return err
+	}
+	if pol == nil {
+		return fmt.Errorf("%w: policy %q", ErrNotFound, *policyID)
+	}
+	return nil
 }
 
 // SetTokenNodes replaces a token's attached nodes with exactly nodeIDs (clear
@@ -174,7 +247,7 @@ func (d *DB) LookupMachineToken(token string) (*MachineToken, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query machine token: %w", err)
 	}
-	return machineTokenFromRow(row.ID, row.Name, row.TokenPrefix, row.CreatedAt, row.LastUsedAt), nil
+	return machineTokenFromRow(row.ID, row.Name, row.TokenPrefix, row.PolicyID, row.PolicyName, row.CreatedAt, row.LastUsedAt), nil
 }
 
 // GetMachineToken returns one token by ID, or nil if it doesn't exist.
@@ -186,13 +259,20 @@ func (d *DB) GetMachineToken(id string) (*MachineToken, error) {
 	if err != nil {
 		return nil, fmt.Errorf("get machine token: %w", err)
 	}
-	return machineTokenFromRow(row.ID, row.Name, row.TokenPrefix, row.CreatedAt, row.LastUsedAt), nil
+	return machineTokenFromRow(row.ID, row.Name, row.TokenPrefix, row.PolicyID, row.PolicyName, row.CreatedAt, row.LastUsedAt), nil
 }
 
 // machineTokenFromRow builds a MachineToken from the columns every token query
-// returns, normalizing the nullable last_used_at.
-func machineTokenFromRow(id, name, prefix string, createdAt time.Time, lastUsed sql.NullTime) *MachineToken {
-	rec := &MachineToken{ID: id, Name: name, TokenPrefix: prefix, CreatedAt: createdAt}
+// returns, normalizing the nullable policy binding and last_used_at.
+func machineTokenFromRow(id, name, prefix string, policyID, policyName sql.NullString, createdAt time.Time, lastUsed sql.NullTime) *MachineToken {
+	rec := &MachineToken{
+		ID:          id,
+		Name:        name,
+		TokenPrefix: prefix,
+		PolicyID:    nullStringToPtr(policyID),
+		PolicyName:  nullStringToPtr(policyName),
+		CreatedAt:   createdAt,
+	}
 	if lastUsed.Valid {
 		t := lastUsed.Time
 		rec.LastUsedAt = &t
@@ -214,9 +294,10 @@ func (d *DB) ListTokenNodes(tokenID string) ([]TokenNode, error) {
 	return out, nil
 }
 
-// AuthorizedSecretsForToken resolves every leaf secret a token may read — its
-// directly-attached nodes plus the subtree beneath any attached group — and
-// decrypts each value. Returns a map keyed by the globally-unique secret name.
+// AuthorizedSecretsForToken resolves every leaf secret a token may read — the
+// union of its directly-attached nodes and its optional bound policy's nodes,
+// each expanded through any attached group's subtree — and decrypts each value.
+// Returns a map keyed by the globally-unique secret name.
 func (d *DB) AuthorizedSecretsForToken(ctx context.Context, tokenID string) (map[string]string, error) {
 	rows, err := d.q.AuthorizedSecretsForToken(ctx, tokenID)
 	if err != nil {
@@ -252,7 +333,7 @@ func (d *DB) ListMachineTokens() ([]MachineToken, error) {
 	}
 	tokens := make([]MachineToken, len(rows))
 	for i, r := range rows {
-		tokens[i] = *machineTokenFromRow(r.ID, r.Name, r.TokenPrefix, r.CreatedAt, r.LastUsedAt)
+		tokens[i] = *machineTokenFromRow(r.ID, r.Name, r.TokenPrefix, r.PolicyID, r.PolicyName, r.CreatedAt, r.LastUsedAt)
 	}
 	return tokens, nil
 }

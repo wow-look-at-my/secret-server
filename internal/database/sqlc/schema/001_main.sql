@@ -68,18 +68,23 @@ CREATE TABLE IF NOT EXISTS policy_precedence (
 CREATE INDEX IF NOT EXISTS idx_policy_precedence_dep ON policy_precedence(node_id, depends_on_id);
 
 -- Machine tokens: a bearer credential for clients that can't present a GitHub
--- OIDC token (e.g. webhook-runner hooks). A token grants secrets by attaching
--- directly to secret-tree nodes (machine_token_nodes) — no policy / pattern
--- indirection. Only the SHA-256 hash is stored; the plaintext (sst_<random>) is
--- shown once at creation.
+-- OIDC token (e.g. webhook-runner hooks). A token grants secrets two ways,
+-- either or both: by attaching directly to secret-tree nodes
+-- (machine_token_nodes) and/or via the optional bound policy (nullable
+-- policy_id, ON DELETE SET NULL — deleting a policy unbinds it but keeps the
+-- token). Only the SHA-256 hash is stored; the plaintext (sst_<random>) is shown
+-- once at creation.
 CREATE TABLE IF NOT EXISTS machine_tokens (
     id           TEXT PRIMARY KEY,
     name         TEXT NOT NULL,
     token_hash   TEXT NOT NULL UNIQUE,
     token_prefix TEXT NOT NULL DEFAULT '',
+    policy_id    TEXT REFERENCES access_policies(id) ON DELETE SET NULL,
     created_at   DATETIME NOT NULL DEFAULT (datetime('now')),
     last_used_at DATETIME
 );
+
+CREATE INDEX IF NOT EXISTS idx_machine_tokens_policy ON machine_tokens(policy_id);
 
 -- The secret-tree nodes a machine token may read. Attaching a group grants its
 -- whole subtree, resolved by the same recursive CTE the OIDC path uses

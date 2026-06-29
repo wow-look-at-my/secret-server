@@ -33,10 +33,21 @@
             </label>
             {{end}}
         </div>
-        <div class="hint">Check each secret this token may fetch. Checking a <strong>group</strong> grants every secret beneath it. The token vends exactly these on <code>GET /github/v1/secrets</code> &mdash; no repo/ref/actor patterns, no policy.</div>
+        <div class="hint">Check each secret this token may fetch. Checking a <strong>group</strong> grants every secret beneath it. No repo/ref/actor patterns are involved.</div>
         {{else}}
         <p class="no-env">No secrets defined yet. <a href="{{prefix}}/secrets/new">Create one</a> first.</p>
         {{end}}
+    </div>
+
+    <div class="form-group">
+        <label for="policy_id">Bound policy <span class="muted">(optional)</span></label>
+        <select id="policy_id" name="policy_id">
+            <option value="">-- No policy (direct attachments only) --</option>
+            {{range .Policies}}
+            <option value="{{.ID}}" {{if eq .ID $.SelectedPolicy}}selected{{end}}>{{.Name}}</option>
+            {{end}}
+        </select>
+        <div class="hint">Optionally also bind a reusable policy: the token vends the <strong>union</strong> of the secrets checked above and the secrets that policy is attached to. Leave as &ldquo;No policy&rdquo; to grant only the direct attachments. The policy's repo/ref/actor patterns are not consulted for a machine token. <a href="{{prefix}}/policies">Manage policies</a>.</div>
     </div>
 
     <div class="actions">

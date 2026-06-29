@@ -1,21 +1,27 @@
 -- name: CreateMachineToken :exec
-INSERT INTO machine_tokens (id, name, token_hash, token_prefix, created_at)
-VALUES (?, ?, ?, ?, ?);
+INSERT INTO machine_tokens (id, name, token_hash, token_prefix, policy_id, created_at)
+VALUES (?, ?, ?, ?, ?, ?);
 
 -- name: GetMachineTokenByHash :one
-SELECT id, name, token_prefix, created_at, last_used_at
-FROM machine_tokens
-WHERE token_hash = ?;
+SELECT t.id, t.name, t.token_prefix, t.policy_id, p.name AS policy_name, t.created_at, t.last_used_at
+FROM machine_tokens t
+LEFT JOIN access_policies p ON p.id = t.policy_id
+WHERE t.token_hash = ?;
 
 -- name: GetMachineToken :one
-SELECT id, name, token_prefix, created_at, last_used_at
-FROM machine_tokens
-WHERE id = ?;
+SELECT t.id, t.name, t.token_prefix, t.policy_id, p.name AS policy_name, t.created_at, t.last_used_at
+FROM machine_tokens t
+LEFT JOIN access_policies p ON p.id = t.policy_id
+WHERE t.id = ?;
 
 -- name: ListMachineTokens :many
-SELECT id, name, token_prefix, created_at, last_used_at
-FROM machine_tokens
-ORDER BY created_at DESC;
+SELECT t.id, t.name, t.token_prefix, t.policy_id, p.name AS policy_name, t.created_at, t.last_used_at
+FROM machine_tokens t
+LEFT JOIN access_policies p ON p.id = t.policy_id
+ORDER BY t.created_at DESC;
+
+-- name: SetMachineTokenPolicy :exec
+UPDATE machine_tokens SET policy_id = ? WHERE id = ?;
 
 -- name: DeleteMachineToken :execresult
 DELETE FROM machine_tokens WHERE id = ?;

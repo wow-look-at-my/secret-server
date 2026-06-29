@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"testing"
 
@@ -54,40 +55,55 @@ func TestMigrateMachineTokensDropsPolicyColumn(t *testing.T) {
 	require.Nil(t, err)
 	require.Nil(t, raw.Close())
 
-	// Opening through New runs migrate(), which drops policy_id.
+	// Opening through New runs migrate(), which relaxes policy_id to nullable.
 	db, err := New(dbPath, enc)
 	require.Nil(t, err)
 	defer db.Close()
 
+	// policy_id still exists, but is now nullable (optional).
 	has, err := db.columnExists("machine_tokens", "policy_id")
 	require.Nil(t, err)
-	assert.False(t, has, "the legacy policy_id column should be dropped")
+	assert.True(t, has, "policy_id stays — it is now an optional binding")
+	notNull, _, err := db.columnNotNull("machine_tokens", "policy_id")
+	require.Nil(t, err)
+	assert.False(t, notNull, "policy_id should be relaxed to nullable")
 
-	// The token row survived the rebuild and still resolves.
+	// The token row survived the rebuild and kept its policy binding.
 	got, err := db.LookupMachineToken(token)
 	require.Nil(t, err)
 	require.NotNil(t, got)
 	assert.Equal(t, "old-token", got.Name)
+	require.NotNil(t, got.PolicyID)
+	assert.Equal(t, "pol1", *got.PolicyID, "the legacy policy binding is preserved")
 
-	// And it can now attach directly to a secret via the new table.
-	s, err := db.CreateSecret(nil, "AFTER_MIGRATION", "v")
+	// The preserved policy binding still vends: attach a secret to pol1 and the
+	// token sees it through the union resolution.
+	viaPolicy, err := db.CreateSecret(nil, "VIA_POLICY", "pv")
 	require.Nil(t, err)
-	require.Nil(t, db.SetTokenNodes("mt1", []string{s.ID()}))
-	nodes, err := db.ListTokenNodes("mt1")
+	require.Nil(t, db.AttachPolicy(viaPolicy.ID(), "pol1"))
+
+	// And it can also attach directly to a secret via the new table.
+	direct, err := db.CreateSecret(nil, "DIRECT", "dv")
 	require.Nil(t, err)
-	require.Equal(t, 1, len(nodes))
-	assert.Equal(t, "AFTER_MIGRATION", nodes[0].Name)
+	require.Nil(t, db.SetTokenNodes("mt1", []string{direct.ID()}))
+
+	secrets, err := db.AuthorizedSecretsForToken(context.Background(), "mt1")
+	require.Nil(t, err)
+	assert.Equal(t, map[string]string{"VIA_POLICY": "pv", "DIRECT": "dv"}, secrets,
+		"the token vends the union of its policy's secrets and its direct attachments")
 }
 
-// TestMigrateMachineTokensIdempotent ensures the drop-policy migration is a
-// no-op on a current-schema database (the column was never there) and that
-// re-running migrate does not error.
+// TestMigrateMachineTokensIdempotent ensures a current-schema database already
+// has a nullable policy_id and that re-running migrate does not error.
 func TestMigrateMachineTokensIdempotent(t *testing.T) {
 	db := testDB(t)
 
 	has, err := db.columnExists("machine_tokens", "policy_id")
 	require.Nil(t, err)
-	assert.False(t, has)
+	assert.True(t, has)
+	notNull, _, err := db.columnNotNull("machine_tokens", "policy_id")
+	require.Nil(t, err)
+	assert.False(t, notNull, "a fresh DB's policy_id is nullable")
 
 	require.Nil(t, db.migrate(), "migrate must be safe to re-run")
 }

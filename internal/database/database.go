@@ -62,11 +62,12 @@ func (d *DB) migrate() error {
 		return nil
 	}
 
-	// Drop the legacy machine_tokens.policy_id column if an earlier schema
-	// version created it (machine tokens now attach directly to secret nodes).
-	// Runs before createCompositeSchema so the IF-NOT-EXISTS machine_token_nodes
-	// table is created against the rebuilt machine_tokens.
-	if err := d.migrateMachineTokensDropPolicy(); err != nil {
+	// Relax machine_tokens.policy_id to nullable if an earlier schema version
+	// made it NOT NULL (machine tokens now grant secrets by direct node
+	// attachment, with the policy binding optional). Runs before
+	// createCompositeSchema so the rebuild happens while machine_token_nodes
+	// does not yet exist to reference machine_tokens.
+	if err := d.migrateMachineTokensPolicyOptional(); err != nil {
 		return fmt.Errorf("migrate machine tokens: %w", err)
 	}
 
@@ -105,18 +106,72 @@ func (d *DB) columnExists(table, column string) (bool, error) {
 	return false, rows.Err()
 }
 
-// migrateMachineTokensDropPolicy rebuilds the machine_tokens table without the
-// legacy NOT NULL policy_id column when an earlier schema version created it.
-// Machine tokens now attach directly to secret nodes (machine_token_nodes), so
-// the policy binding is gone. The table is small and self-contained — the
-// rebuild copies the surviving columns and never touches secret_nodes, so no
-// secret data is at risk. No-op on a fresh DB (the column never existed) and on
-// an already-migrated one (idempotent). It runs before machine_token_nodes is
-// created, so nothing references machine_tokens when it is dropped.
-func (d *DB) migrateMachineTokensDropPolicy() error {
-	has, err := d.columnExists("machine_tokens", "policy_id")
-	if err != nil || !has {
+// tableExists reports whether a table with the given name exists.
+func (d *DB) tableExists(name string) (bool, error) {
+	var got string
+	err := d.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, name).Scan(&got)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// columnNotNull reports whether table.column exists and carries a NOT NULL
+// constraint (PRAGMA table_info's notnull flag).
+func (d *DB) columnNotNull(table, column string) (notNull, exists bool, err error) {
+	rows, err := d.db.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		return false, false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notnull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return false, false, err
+		}
+		if name == column {
+			return notnull == 1, true, nil
+		}
+	}
+	return false, false, rows.Err()
+}
+
+// migrateMachineTokensPolicyOptional brings an existing machine_tokens table to
+// the current shape, where policy_id is an OPTIONAL nullable column (a token
+// grants secrets by direct node attachment and/or an optional policy). It
+// handles every prior shape:
+//   - NOT NULL policy_id (the first machine-tokens schema) -> rebuilt to a
+//     nullable column with ON DELETE SET NULL, preserving the rows;
+//   - no policy_id column (an interim direct-only schema) -> the column is
+//     added back, nullable;
+//   - already nullable, or no table yet (fresh DB) -> no-op (createCompositeSchema
+//     creates it nullable).
+//
+// The rebuild copies only machine_tokens and never touches secret_nodes, so no
+// secret data is at risk, and it runs before machine_token_nodes is created so
+// nothing references machine_tokens when it is dropped.
+func (d *DB) migrateMachineTokensPolicyOptional() error {
+	exists, err := d.tableExists("machine_tokens")
+	if err != nil || !exists {
 		return err
+	}
+	notNull, colExists, err := d.columnNotNull("machine_tokens", "policy_id")
+	if err != nil {
+		return err
+	}
+	if !colExists {
+		_, err := d.db.Exec(`ALTER TABLE machine_tokens ADD COLUMN policy_id TEXT REFERENCES access_policies(id) ON DELETE SET NULL`)
+		return err
+	}
+	if !notNull {
+		return nil // already nullable
 	}
 	stmts := []string{
 		`DROP INDEX IF EXISTS idx_machine_tokens_policy`,
@@ -125,13 +180,15 @@ func (d *DB) migrateMachineTokensDropPolicy() error {
 			name         TEXT NOT NULL,
 			token_hash   TEXT NOT NULL UNIQUE,
 			token_prefix TEXT NOT NULL DEFAULT '',
+			policy_id    TEXT REFERENCES access_policies(id) ON DELETE SET NULL,
 			created_at   DATETIME NOT NULL DEFAULT (datetime('now')),
 			last_used_at DATETIME
 		)`,
-		`INSERT INTO machine_tokens_new (id, name, token_hash, token_prefix, created_at, last_used_at)
-			SELECT id, name, token_hash, token_prefix, created_at, last_used_at FROM machine_tokens`,
+		`INSERT INTO machine_tokens_new (id, name, token_hash, token_prefix, policy_id, created_at, last_used_at)
+			SELECT id, name, token_hash, token_prefix, policy_id, created_at, last_used_at FROM machine_tokens`,
 		`DROP TABLE machine_tokens`,
 		`ALTER TABLE machine_tokens_new RENAME TO machine_tokens`,
+		`CREATE INDEX IF NOT EXISTS idx_machine_tokens_policy ON machine_tokens(policy_id)`,
 	}
 	for _, s := range stmts {
 		if _, err := d.db.Exec(s); err != nil {
@@ -204,19 +261,23 @@ func (d *DB) createCompositeSchema(exec sqlExecer) error {
 			CHECK (policy_id != depends_on_id)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_policy_precedence_dep ON policy_precedence(node_id, depends_on_id)`,
+		// A machine token grants secrets two ways, either or both: by attaching
+		// directly to secret-tree nodes (machine_token_nodes) and/or via an
+		// optional bound policy (the nullable policy_id). policy_id is nullable
+		// and ON DELETE SET NULL — deleting a bound policy just unbinds it, the
+		// token (and its direct attachments) survive.
 		`CREATE TABLE IF NOT EXISTS machine_tokens (
 			id           TEXT PRIMARY KEY,
 			name         TEXT NOT NULL,
 			token_hash   TEXT NOT NULL UNIQUE,
 			token_prefix TEXT NOT NULL DEFAULT '',
+			policy_id    TEXT REFERENCES access_policies(id) ON DELETE SET NULL,
 			created_at   DATETIME NOT NULL DEFAULT (datetime('now')),
 			last_used_at DATETIME
 		)`,
-		// A machine token grants secrets by attaching directly to secret-tree
-		// nodes (a leaf or a group); attaching a group grants its whole
-		// subtree, resolved by the same recursive CTE the OIDC path uses. No
-		// policy / pattern indirection — a token simply lists the nodes it may
-		// read.
+		`CREATE INDEX IF NOT EXISTS idx_machine_tokens_policy ON machine_tokens(policy_id)`,
+		// Direct node attachments. Attaching a group grants its whole subtree,
+		// resolved by the same recursive CTE the OIDC path uses.
 		`CREATE TABLE IF NOT EXISTS machine_token_nodes (
 			token_id TEXT NOT NULL REFERENCES machine_tokens(id) ON DELETE CASCADE,
 			node_id  TEXT NOT NULL REFERENCES secret_nodes(id)   ON DELETE CASCADE,

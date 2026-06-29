@@ -94,7 +94,7 @@ func TestUIMachineTokenEditAndUpdate(t *testing.T) {
 	env := setup(t)
 	a, _ := env.db.CreateSecret(nil, "A", "1")
 	b, _ := env.db.CreateSecret(nil, "B", "2")
-	_, rec, err := env.db.CreateMachineToken("t", []string{a.ID()})
+	_, rec, err := env.db.CreateMachineToken("t", nil, []string{a.ID()})
 	require.Nil(t, err)
 
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
@@ -124,7 +124,7 @@ func TestUIMachineTokenEditAndUpdate(t *testing.T) {
 func TestUIMachineTokenUpdateRequiresASecret(t *testing.T) {
 	env := setup(t)
 	s, _ := env.db.CreateSecret(nil, "S", "v")
-	_, rec, err := env.db.CreateMachineToken("t", []string{s.ID()})
+	_, rec, err := env.db.CreateMachineToken("t", nil, []string{s.ID()})
 	require.Nil(t, err)
 
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
@@ -177,4 +177,30 @@ func TestUIListMachineTokensDBError(t *testing.T) {
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+}
+
+func TestUIMachineTokenCreateWithPolicy(t *testing.T) {
+	env := setup(t)
+	p, err := env.db.CreatePolicy("pol", nil, nil, nil)
+	require.Nil(t, err)
+	s, _ := env.db.CreateSecret(nil, "VIA_POLICY", "pv")
+	require.Nil(t, env.db.AttachPolicy(s.ID(), p.ID))
+
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	// Bind a policy with no direct nodes — the token is valid (it grants via the policy).
+	form := "name=t&policy_id=" + p.ID
+	req := httptest.NewRequest("POST", "/admin/machine-tokens", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Body.String(), "sst_")
+
+	tokens, _ := env.db.ListMachineTokens()
+	require.Equal(t, 1, len(tokens))
+	require.NotNil(t, tokens[0].PolicyID)
+	assert.Equal(t, p.ID, *tokens[0].PolicyID)
 }

@@ -12,9 +12,9 @@ import (
 )
 
 // Machine-token admin UI pages. Routes are registered in UIHandler.Register.
-// A machine token attaches directly to secret-tree nodes and vends those
-// secrets (a group grants its whole subtree) to non-Actions clients — no policy
-// indirection. See internal/database/machine_tokens.go.
+// A machine token grants secrets two ways, either or both: by attaching directly
+// to secret-tree nodes, and/or via an optional bound policy. It vends the union
+// to non-Actions clients. See internal/database/machine_tokens.go.
 
 // nodeOption is one selectable secret-tree node in the token form's picker.
 type nodeOption struct {
@@ -24,7 +24,8 @@ type nodeOption struct {
 	Selected bool
 }
 
-// machineTokenListView pairs a token with the nodes it grants, for the list page.
+// machineTokenListView pairs a token with the nodes it grants directly, for the
+// list page (the bound policy, if any, is on the embedded MachineToken).
 type machineTokenListView struct {
 	database.MachineToken
 	Nodes []database.TokenNode
@@ -74,6 +75,24 @@ func selectedSet(ids []string) map[string]bool {
 	return m
 }
 
+// formPolicyID reads the optional policy_id form field as a pointer (nil when
+// the operator chose "no policy").
+func formPolicyID(r *http.Request) *string {
+	id := r.FormValue("policy_id")
+	if id == "" {
+		return nil
+	}
+	return &id
+}
+
+// derefString returns the pointed-at string, or "" for nil.
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
 func (h *UIHandler) listMachineTokens(w http.ResponseWriter, r *http.Request) {
 	tokens, err := h.db.ListMachineTokens()
 	if err != nil {
@@ -94,17 +113,29 @@ func (h *UIHandler) listMachineTokens(w http.ResponseWriter, r *http.Request) {
 	h.tmpl.Render(w, r, "machine_tokens_list.html", map[string]any{"Tokens": views})
 }
 
-func (h *UIHandler) newMachineToken(w http.ResponseWriter, r *http.Request) {
-	opts, err := h.nodeOptions(nil)
+// renderTokenForm renders the create/edit form with the node picker and policy
+// dropdown populated. selectedPolicy pre-selects a policy in the dropdown.
+func (h *UIHandler) renderTokenForm(w http.ResponseWriter, r *http.Request, data map[string]any, selectedNodes map[string]bool, selectedPolicy string) {
+	opts, err := h.nodeOptions(selectedNodes)
 	if err != nil {
 		slog.Error("load nodes for machine token form failed", "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	h.tmpl.Render(w, r, "machine_token_form.html", map[string]any{
-		"IsNew": true,
-		"Nodes": opts,
-	})
+	policies, err := h.db.ListPolicies()
+	if err != nil {
+		slog.Error("list policies for machine token form failed", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	data["Nodes"] = opts
+	data["Policies"] = policies
+	data["SelectedPolicy"] = selectedPolicy
+	h.tmpl.Render(w, r, "machine_token_form.html", data)
+}
+
+func (h *UIHandler) newMachineToken(w http.ResponseWriter, r *http.Request) {
+	h.renderTokenForm(w, r, map[string]any{"IsNew": true}, nil, "")
 }
 
 func (h *UIHandler) createMachineToken(w http.ResponseWriter, r *http.Request) {
@@ -115,30 +146,26 @@ func (h *UIHandler) createMachineToken(w http.ResponseWriter, r *http.Request) {
 	}
 	name := strings.TrimSpace(r.FormValue("name"))
 	nodeIDs := r.Form["node_ids"]
+	policyID := formPolicyID(r)
 
 	renderErr := func(msg string) {
-		opts, _ := h.nodeOptions(selectedSet(nodeIDs))
-		h.tmpl.Render(w, r, "machine_token_form.html", map[string]any{
-			"IsNew": true,
-			"Error": msg,
-			"Form":  r.Form,
-			"Nodes": opts,
-		})
+		h.renderTokenForm(w, r, map[string]any{"IsNew": true, "Error": msg, "Form": r.Form},
+			selectedSet(nodeIDs), derefString(policyID))
 	}
 
 	if name == "" {
 		renderErr("Name is required.")
 		return
 	}
-	if len(nodeIDs) == 0 {
-		renderErr("Select at least one secret or group for this token to grant.")
+	if policyID == nil && len(nodeIDs) == 0 {
+		renderErr("Grant the token something: pick at least one secret or group, or bind a policy.")
 		return
 	}
 
-	token, rec, err := h.db.CreateMachineToken(name, nodeIDs)
+	token, rec, err := h.db.CreateMachineToken(name, policyID, nodeIDs)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
-			renderErr("One or more selected secrets no longer exist. Reload and try again.")
+			renderErr("The selected policy or secret no longer exists. Reload and try again.")
 			return
 		}
 		slog.Error("create machine token failed", "error", err)
@@ -146,7 +173,7 @@ func (h *UIHandler) createMachineToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	details, _ := json.Marshal(map[string]any{"name": name, "node_count": len(nodeIDs)})
+	details, _ := json.Marshal(map[string]any{"name": name, "policy_id": derefString(policyID), "node_count": len(nodeIDs)})
 	if err := h.audit.CreateEntry("machine_token.create", "admin", uiActor(r), "machine_token", rec.ID, string(details)); err != nil {
 		slog.Error("audit log failed", "error", err)
 	}
@@ -180,17 +207,7 @@ func (h *UIHandler) editMachineToken(w http.ResponseWriter, r *http.Request) {
 	for _, n := range attached {
 		sel[n.ID] = true
 	}
-	opts, err := h.nodeOptions(sel)
-	if err != nil {
-		slog.Error("load nodes for machine token form failed", "error", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-	h.tmpl.Render(w, r, "machine_token_form.html", map[string]any{
-		"IsNew": false,
-		"Token": tok,
-		"Nodes": opts,
-	})
+	h.renderTokenForm(w, r, map[string]any{"IsNew": false, "Token": tok}, sel, derefString(tok.PolicyID))
 }
 
 func (h *UIHandler) updateMachineTokenForm(w http.ResponseWriter, r *http.Request) {
@@ -201,6 +218,7 @@ func (h *UIHandler) updateMachineTokenForm(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	nodeIDs := r.Form["node_ids"]
+	policyID := formPolicyID(r)
 
 	tok, err := h.db.GetMachineToken(id)
 	if err != nil {
@@ -214,22 +232,17 @@ func (h *UIHandler) updateMachineTokenForm(w http.ResponseWriter, r *http.Reques
 	}
 
 	renderErr := func(msg string) {
-		opts, _ := h.nodeOptions(selectedSet(nodeIDs))
-		h.tmpl.Render(w, r, "machine_token_form.html", map[string]any{
-			"IsNew": false,
-			"Token": tok,
-			"Error": msg,
-			"Nodes": opts,
-		})
+		h.renderTokenForm(w, r, map[string]any{"IsNew": false, "Token": tok, "Error": msg},
+			selectedSet(nodeIDs), derefString(policyID))
 	}
 
-	if len(nodeIDs) == 0 {
-		renderErr("Select at least one secret or group.")
+	if policyID == nil && len(nodeIDs) == 0 {
+		renderErr("Grant the token something: pick at least one secret or group, or bind a policy.")
 		return
 	}
-	if err := h.db.SetTokenNodes(id, nodeIDs); err != nil {
+	if err := h.db.UpdateMachineToken(id, policyID, nodeIDs); err != nil {
 		if errors.Is(err, database.ErrNotFound) {
-			renderErr("One or more selected secrets no longer exist. Reload and try again.")
+			renderErr("The selected policy or secret no longer exists. Reload and try again.")
 			return
 		}
 		slog.Error("update machine token failed", "error", err)
@@ -237,7 +250,7 @@ func (h *UIHandler) updateMachineTokenForm(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	details, _ := json.Marshal(map[string]any{"node_count": len(nodeIDs)})
+	details, _ := json.Marshal(map[string]any{"policy_id": derefString(policyID), "node_count": len(nodeIDs)})
 	if err := h.audit.CreateEntry("machine_token.update", "admin", uiActor(r), "machine_token", id, string(details)); err != nil {
 		slog.Error("audit log failed", "error", err)
 	}

@@ -31,6 +31,7 @@ type MachineToken struct {
 	Name        string
 	TokenHash   string
 	TokenPrefix string
+	PolicyID    sql.NullString
 	CreatedAt   time.Time
 	LastUsedAt  sql.NullTime
 }

@@ -24,7 +24,7 @@ func createSecret(t *testing.T, env *testEnv, name, value string) string {
 func TestPublicFetchSecretsMachineToken(t *testing.T) {
 	env := setup(t)
 	nodeID := createSecret(t, env, "GITHUB_APP_PRIVATE_KEY", "PEMDATA")
-	token, _, err := env.db.CreateMachineToken("pr-minder-reconcile", []string{nodeID})
+	token, _, err := env.db.CreateMachineToken("pr-minder-reconcile", nil, []string{nodeID})
 	require.NoError(t, err)
 
 	h := NewPublicHandler(env.db, env.audit, env.oidc)
@@ -73,7 +73,7 @@ func TestPublicFetchSecretsMachineTokenInvalid(t *testing.T) {
 func TestPublicFetchSecretsMachineTokenRevoked(t *testing.T) {
 	env := setup(t)
 	nodeID := createSecret(t, env, "K", "v")
-	token, rec, err := env.db.CreateMachineToken("temp", []string{nodeID})
+	token, rec, err := env.db.CreateMachineToken("temp", nil, []string{nodeID})
 	require.NoError(t, err)
 	require.NoError(t, env.db.DeleteMachineToken(rec.ID))
 
@@ -152,7 +152,7 @@ func TestAdminUpdateMachineTokenNodes(t *testing.T) {
 
 	aID := createSecret(t, env, "A", "1")
 	bID := createSecret(t, env, "B", "2")
-	_, rec, err := env.db.CreateMachineToken("t", []string{aID})
+	_, rec, err := env.db.CreateMachineToken("t", nil, []string{aID})
 	require.NoError(t, err)
 
 	// Replace the grant set with B.
@@ -193,6 +193,76 @@ func TestAdminCreateMachineTokenUnknownNode(t *testing.T) {
 
 	body := `{"name":"x","node_ids":["00000000-0000-0000-0000-000000000000"]}`
 	req := jsonReq("POST", "/admin/v1/machine-tokens", body)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+// policyWithSecret creates a policy attached to a fresh secret and returns the
+// policy ID, for exercising the optional policy-binding path.
+func policyWithSecret(t *testing.T, env *testEnv, secretName, value string) string {
+	t.Helper()
+	p, err := env.db.CreatePolicy("pol-"+secretName, nil, nil, nil)
+	require.Nil(t, err)
+	s, err := env.db.CreateSecret(nil, secretName, value)
+	require.Nil(t, err)
+	require.Nil(t, env.db.AttachPolicy(s.ID(), p.ID))
+	return p.ID
+}
+
+func TestAdminCreateMachineTokenWithPolicy(t *testing.T) {
+	env := setup(t)
+	h := NewAdminHandler(env.db, env.audit)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	policyID := policyWithSecret(t, env, "VIA_POLICY", "pv")
+
+	req := jsonReq("POST", "/admin/v1/machine-tokens", `{"name":"t","policy_id":"`+policyID+`"}`)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusCreated, rr.Code)
+	var created map[string]string
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &created))
+
+	// The policy-bound token vends the policy's secret.
+	ph := NewPublicHandler(env.db, env.audit, env.oidc)
+	pmux := chi.NewRouter()
+	ph.Register(pmux)
+	preq := httptest.NewRequest("GET", "/github/v1/secrets", nil)
+	preq.Header.Set("Authorization", "Bearer "+created["token"])
+	prr := httptest.NewRecorder()
+	pmux.ServeHTTP(prr, preq)
+	require.Equal(t, http.StatusOK, prr.Code)
+	var vended map[string]string
+	require.NoError(t, json.Unmarshal(prr.Body.Bytes(), &vended))
+	assert.Equal(t, "pv", vended["VIA_POLICY"])
+}
+
+func TestAdminCreateMachineTokenBadPolicyUUID(t *testing.T) {
+	env := setup(t)
+	h := NewAdminHandler(env.db, env.audit)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	req := jsonReq("POST", "/admin/v1/machine-tokens", `{"name":"t","policy_id":"not-a-uuid"}`)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestAdminUpdateMachineTokenUnknownPolicy(t *testing.T) {
+	env := setup(t)
+	h := NewAdminHandler(env.db, env.audit)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	nodeID := createSecret(t, env, "A", "1")
+	_, rec, err := env.db.CreateMachineToken("t", nil, []string{nodeID})
+	require.NoError(t, err)
+
+	body := `{"policy_id":"00000000-0000-0000-0000-000000000000","node_ids":["` + nodeID + `"]}`
+	req := jsonReq("PUT", "/admin/v1/machine-tokens/"+rec.ID, body)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusBadRequest, rr.Code)

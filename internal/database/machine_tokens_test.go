@@ -15,7 +15,7 @@ func TestMachineTokenCreateAndLookup(t *testing.T) {
 	s, err := db.CreateSecret(nil, "API_KEY", "shh")
 	require.Nil(t, err)
 
-	token, rec, err := db.CreateMachineToken("reconcile", []string{s.ID()})
+	token, rec, err := db.CreateMachineToken("reconcile", nil, []string{s.ID()})
 	require.Nil(t, err)
 	require.NotNil(t, rec)
 	assert.True(t, strings.HasPrefix(token, MachineTokenPrefix), "token should carry the sst_ prefix")
@@ -43,7 +43,7 @@ func TestMachineTokenGrantsGroupSubtree(t *testing.T) {
 	_, err = db.CreateSecret(&gid, "B", "2")
 	require.Nil(t, err)
 
-	_, rec, err := db.CreateMachineToken("t", []string{g.ID()})
+	_, rec, err := db.CreateMachineToken("t", nil, []string{g.ID()})
 	require.Nil(t, err)
 
 	secrets, err := db.AuthorizedSecretsForToken(context.Background(), rec.ID)
@@ -53,7 +53,7 @@ func TestMachineTokenGrantsGroupSubtree(t *testing.T) {
 
 func TestMachineTokenWithNoNodesVendsNothing(t *testing.T) {
 	db := testDB(t)
-	_, rec, err := db.CreateMachineToken("empty", nil)
+	_, rec, err := db.CreateMachineToken("empty", nil, nil)
 	require.Nil(t, err)
 	secrets, err := db.AuthorizedSecretsForToken(context.Background(), rec.ID)
 	require.Nil(t, err)
@@ -64,7 +64,7 @@ func TestMachineTokenSetNodesReplaces(t *testing.T) {
 	db := testDB(t)
 	s1, _ := db.CreateSecret(nil, "S1", "v1")
 	s2, _ := db.CreateSecret(nil, "S2", "v2")
-	_, rec, err := db.CreateMachineToken("t", []string{s1.ID()})
+	_, rec, err := db.CreateMachineToken("t", nil, []string{s1.ID()})
 	require.Nil(t, err)
 
 	nodes, err := db.ListTokenNodes(rec.ID)
@@ -81,7 +81,7 @@ func TestMachineTokenSetNodesReplaces(t *testing.T) {
 
 func TestMachineTokenAttachUnknownNodeRollsBack(t *testing.T) {
 	db := testDB(t)
-	_, _, err := db.CreateMachineToken("t", []string{uuid.NewString()})
+	_, _, err := db.CreateMachineToken("t", nil, []string{uuid.NewString()})
 	assert.ErrorIs(t, err, ErrNotFound)
 	n, _ := db.CountMachineTokens()
 	assert.Equal(t, 0, n, "a failed attach rolls back the whole create")
@@ -90,7 +90,7 @@ func TestMachineTokenAttachUnknownNodeRollsBack(t *testing.T) {
 func TestMachineTokenSetUnknownNodeKeepsPrior(t *testing.T) {
 	db := testDB(t)
 	s, _ := db.CreateSecret(nil, "S", "v")
-	_, rec, err := db.CreateMachineToken("t", []string{s.ID()})
+	_, rec, err := db.CreateMachineToken("t", nil, []string{s.ID()})
 	require.Nil(t, err)
 
 	err = db.SetTokenNodes(rec.ID, []string{uuid.NewString()})
@@ -104,7 +104,7 @@ func TestMachineTokenSetUnknownNodeKeepsPrior(t *testing.T) {
 func TestMachineTokenAttachmentCascadesOnSecretDelete(t *testing.T) {
 	db := testDB(t)
 	s, _ := db.CreateSecret(nil, "S", "v")
-	_, rec, err := db.CreateMachineToken("t", []string{s.ID()})
+	_, rec, err := db.CreateMachineToken("t", nil, []string{s.ID()})
 	require.Nil(t, err)
 
 	require.Nil(t, db.DeleteNode(s.ID()))
@@ -128,7 +128,7 @@ func TestMachineTokenLookupUnknownReturnsNil(t *testing.T) {
 func TestGetMachineToken(t *testing.T) {
 	db := testDB(t)
 	s, _ := db.CreateSecret(nil, "S", "v")
-	_, rec, err := db.CreateMachineToken("t", []string{s.ID()})
+	_, rec, err := db.CreateMachineToken("t", nil, []string{s.ID()})
 	require.Nil(t, err)
 
 	got, err := db.GetMachineToken(rec.ID)
@@ -144,7 +144,7 @@ func TestGetMachineToken(t *testing.T) {
 func TestMachineTokenTouchRecordsUsage(t *testing.T) {
 	db := testDB(t)
 	s, _ := db.CreateSecret(nil, "S", "v")
-	token, rec, err := db.CreateMachineToken("x", []string{s.ID()})
+	token, rec, err := db.CreateMachineToken("x", nil, []string{s.ID()})
 	require.Nil(t, err)
 
 	require.Nil(t, db.TouchMachineToken(rec.ID))
@@ -158,7 +158,7 @@ func TestMachineTokenTouchRecordsUsage(t *testing.T) {
 func TestMachineTokenListDeleteCount(t *testing.T) {
 	db := testDB(t)
 	s, _ := db.CreateSecret(nil, "S", "v")
-	token, rec, err := db.CreateMachineToken("reconcile", []string{s.ID()})
+	token, rec, err := db.CreateMachineToken("reconcile", nil, []string{s.ID()})
 	require.Nil(t, err)
 
 	list, err := db.ListMachineTokens()
@@ -181,9 +181,93 @@ func TestMachineTokenListDeleteCount(t *testing.T) {
 func TestMachineTokensAreUnique(t *testing.T) {
 	db := testDB(t)
 	s, _ := db.CreateSecret(nil, "S", "v")
-	t1, _, err := db.CreateMachineToken("a", []string{s.ID()})
+	t1, _, err := db.CreateMachineToken("a", nil, []string{s.ID()})
 	require.Nil(t, err)
-	t2, _, err := db.CreateMachineToken("b", []string{s.ID()})
+	t2, _, err := db.CreateMachineToken("b", nil, []string{s.ID()})
 	require.Nil(t, err)
 	assert.NotEqual(t, t1, t2, "each minted token must be distinct")
+}
+
+func TestMachineTokenWithPolicyOnly(t *testing.T) {
+	db := testDB(t)
+	p, err := db.CreatePolicy("pol", nil, nil, nil)
+	require.Nil(t, err)
+	sec, _ := db.CreateSecret(nil, "POLSECRET", "pv")
+	require.Nil(t, db.AttachPolicy(sec.ID(), p.ID))
+
+	_, rec, err := db.CreateMachineToken("t", &p.ID, nil)
+	require.Nil(t, err)
+	require.NotNil(t, rec.PolicyID)
+	assert.Equal(t, p.ID, *rec.PolicyID)
+
+	secrets, err := db.AuthorizedSecretsForToken(context.Background(), rec.ID)
+	require.Nil(t, err)
+	assert.Equal(t, map[string]string{"POLSECRET": "pv"}, secrets, "a policy-only token vends the policy's secrets")
+}
+
+func TestMachineTokenUnionPolicyAndDirect(t *testing.T) {
+	db := testDB(t)
+	p, _ := db.CreatePolicy("pol", nil, nil, nil)
+	polSec, _ := db.CreateSecret(nil, "VIA_POLICY", "pv")
+	require.Nil(t, db.AttachPolicy(polSec.ID(), p.ID))
+	direct, _ := db.CreateSecret(nil, "DIRECT", "dv")
+
+	_, rec, err := db.CreateMachineToken("t", &p.ID, []string{direct.ID()})
+	require.Nil(t, err)
+
+	secrets, err := db.AuthorizedSecretsForToken(context.Background(), rec.ID)
+	require.Nil(t, err)
+	assert.Equal(t, map[string]string{"VIA_POLICY": "pv", "DIRECT": "dv"}, secrets,
+		"a token vends the union of its policy's secrets and its direct attachments")
+}
+
+func TestMachineTokenCreateUnknownPolicyRollsBack(t *testing.T) {
+	db := testDB(t)
+	bogus := uuid.NewString()
+	_, _, err := db.CreateMachineToken("t", &bogus, nil)
+	assert.ErrorIs(t, err, ErrNotFound)
+	n, _ := db.CountMachineTokens()
+	assert.Equal(t, 0, n, "an unknown policy fails the whole create")
+}
+
+func TestUpdateMachineTokenPolicyAndNodes(t *testing.T) {
+	db := testDB(t)
+	p, _ := db.CreatePolicy("pol", nil, nil, nil)
+	polSec, _ := db.CreateSecret(nil, "POL", "pv")
+	require.Nil(t, db.AttachPolicy(polSec.ID(), p.ID))
+	a, _ := db.CreateSecret(nil, "A", "1")
+	b, _ := db.CreateSecret(nil, "B", "2")
+
+	_, rec, err := db.CreateMachineToken("t", nil, []string{a.ID()})
+	require.Nil(t, err)
+
+	// Bind the policy and switch the direct attachment to B.
+	require.Nil(t, db.UpdateMachineToken(rec.ID, &p.ID, []string{b.ID()}))
+	got, _ := db.GetMachineToken(rec.ID)
+	require.NotNil(t, got.PolicyID)
+	assert.Equal(t, p.ID, *got.PolicyID)
+	secrets, err := db.AuthorizedSecretsForToken(context.Background(), rec.ID)
+	require.Nil(t, err)
+	assert.Equal(t, map[string]string{"POL": "pv", "B": "2"}, secrets)
+
+	// Unbind the policy (nil), keep B.
+	require.Nil(t, db.UpdateMachineToken(rec.ID, nil, []string{b.ID()}))
+	got, _ = db.GetMachineToken(rec.ID)
+	assert.Nil(t, got.PolicyID, "policy unbound")
+	secrets, _ = db.AuthorizedSecretsForToken(context.Background(), rec.ID)
+	assert.Equal(t, map[string]string{"B": "2"}, secrets)
+}
+
+func TestUpdateMachineTokenUnknownPolicyKeepsPrior(t *testing.T) {
+	db := testDB(t)
+	a, _ := db.CreateSecret(nil, "A", "1")
+	_, rec, err := db.CreateMachineToken("t", nil, []string{a.ID()})
+	require.Nil(t, err)
+
+	bogus := uuid.NewString()
+	err = db.UpdateMachineToken(rec.ID, &bogus, []string{a.ID()})
+	assert.ErrorIs(t, err, ErrNotFound)
+
+	got, _ := db.GetMachineToken(rec.ID)
+	assert.Nil(t, got.PolicyID, "a failed update leaves the token unbound")
 }
