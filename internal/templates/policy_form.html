@@ -25,15 +25,15 @@
     <div class="form-group">
         <label for="ref_patterns">Ref Patterns</label>
         <textarea id="ref_patterns" name="ref_patterns" rows="3"
-            placeholder="refs/heads/main&#10;refs/tags/v*">{{if .IsNew}}*{{else}}{{joinLines .Policy.RefPatterns}}{{end}}</textarea>
-        <div class="hint">One SQLite GLOB per line. Git ref filter (e.g. <code>refs/heads/main</code>). Leave blank to default to <code>*</code> (match any ref). A policy with no ref patterns matches nothing.</div>
+            placeholder="refs/heads/main&#10;refs/tags/v*">{{if not .IsNew}}{{joinLines .Policy.RefPatterns}}{{end}}</textarea>
+        <div class="hint">One SQLite GLOB per line. Git ref filter (e.g. <code>refs/heads/main</code>). Leave blank to match nothing (no implicit wildcard) &mdash; write <code>*</code> explicitly to match any ref.</div>
     </div>
 
     <div class="form-group">
         <label for="actor_patterns">Actor Patterns</label>
         <textarea id="actor_patterns" name="actor_patterns" rows="3"
-            placeholder="octocat&#10;my-team-*">{{if .IsNew}}*{{else}}{{joinLines .Policy.ActorPatterns}}{{end}}</textarea>
-        <div class="hint">One SQLite GLOB per line. GitHub username filter. Leave blank to default to <code>*</code> (match any actor). A policy with no actor patterns matches nothing.</div>
+            placeholder="octocat&#10;my-team-*">{{if not .IsNew}}{{joinLines .Policy.ActorPatterns}}{{end}}</textarea>
+        <div class="hint">One SQLite GLOB per line. GitHub username filter. Leave blank to match nothing (no implicit wildcard) &mdash; write <code>*</code> explicitly to match any actor.</div>
     </div>
 
     <div class="actions">

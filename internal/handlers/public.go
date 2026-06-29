@@ -170,8 +170,6 @@ func (h *PublicHandler) fetchSecretsMachine(w http.ResponseWriter, r *http.Reque
 	slog.Info("machine token validated",
 		"token_id", rec.ID,
 		"token_name", rec.Name,
-		"policy_id", rec.PolicyID,
-		"policy", rec.PolicyName,
 	)
 
 	// Record usage best-effort — a failed timestamp update must not block the vend.
@@ -179,13 +177,12 @@ func (h *PublicHandler) fetchSecretsMachine(w http.ResponseWriter, r *http.Reque
 		slog.Warn("failed to record machine token usage", "token_id", rec.ID, "error", err)
 	}
 
-	secrets, err := h.db.AuthorizedSecrets(r.Context(), []string{rec.PolicyID})
+	secrets, err := h.db.AuthorizedSecretsForToken(r.Context(), rec.ID)
 	if err != nil {
 		slog.Error("failed to load secrets for machine token", "token_id", rec.ID, "error", err)
 		h.logAccessDenied("machine_token", rec.Name, "secret_retrieval_error", map[string]any{
-			"token_id":  rec.ID,
-			"policy_id": rec.PolicyID,
-			"error":     err.Error(),
+			"token_id": rec.ID,
+			"error":    err.Error(),
 		})
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
@@ -194,8 +191,6 @@ func (h *PublicHandler) fetchSecretsMachine(w http.ResponseWriter, r *http.Reque
 	details, _ := json.Marshal(map[string]any{
 		"token_id":      rec.ID,
 		"token_name":    rec.Name,
-		"policy_id":     rec.PolicyID,
-		"policy":        rec.PolicyName,
 		"secrets_count": len(secrets),
 	})
 	if err := h.audit.CreateEntry("secret.access.granted", "machine_token", rec.Name, "secret", "", string(details)); err != nil {

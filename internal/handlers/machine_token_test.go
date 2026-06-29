@@ -12,26 +12,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// attachSecretViaPolicy creates a group + secret, a policy, attaches the policy
-// to the group, and returns the policy ID. Mirrors how the OIDC tests wire a
-// secret to a policy.
-func attachSecretViaPolicy(t *testing.T, env *testEnv, secretName, value string) string {
+// createSecret makes a top-level secret node and returns its ID. Machine tokens
+// attach to node IDs directly (no policy).
+func createSecret(t *testing.T, env *testEnv, name, value string) string {
 	t.Helper()
-	g, err := env.db.CreateGroup(nil, "grp-"+secretName)
+	s, err := env.db.CreateSecret(nil, name, value)
 	require.Nil(t, err)
-	gID := g.ID()
-	_, err = env.db.CreateSecret(&gID, secretName, value)
-	require.Nil(t, err)
-	p, err := env.db.CreatePolicy("pol-"+secretName, []string{"*"}, []string{"*"}, []string{"*"})
-	require.Nil(t, err)
-	require.Nil(t, env.db.AttachPolicy(gID, p.ID))
-	return p.ID
+	return s.ID()
 }
 
 func TestPublicFetchSecretsMachineToken(t *testing.T) {
 	env := setup(t)
-	policyID := attachSecretViaPolicy(t, env, "GITHUB_APP_PRIVATE_KEY", "PEMDATA")
-	token, _, err := env.db.CreateMachineToken("pr-minder-reconcile", policyID)
+	nodeID := createSecret(t, env, "GITHUB_APP_PRIVATE_KEY", "PEMDATA")
+	token, _, err := env.db.CreateMachineToken("pr-minder-reconcile", []string{nodeID})
 	require.NoError(t, err)
 
 	h := NewPublicHandler(env.db, env.audit, env.oidc)
@@ -79,8 +72,8 @@ func TestPublicFetchSecretsMachineTokenInvalid(t *testing.T) {
 
 func TestPublicFetchSecretsMachineTokenRevoked(t *testing.T) {
 	env := setup(t)
-	policyID := attachSecretViaPolicy(t, env, "K", "v")
-	token, rec, err := env.db.CreateMachineToken("temp", policyID)
+	nodeID := createSecret(t, env, "K", "v")
+	token, rec, err := env.db.CreateMachineToken("temp", []string{nodeID})
 	require.NoError(t, err)
 	require.NoError(t, env.db.DeleteMachineToken(rec.ID))
 
@@ -101,9 +94,9 @@ func TestAdminMachineTokenLifecycle(t *testing.T) {
 	mux := chi.NewRouter()
 	h.Register(mux)
 
-	policyID := attachSecretViaPolicy(t, env, "X", "y")
+	nodeID := createSecret(t, env, "X", "y")
 
-	body := `{"name":"reconcile","policy_id":"` + policyID + `"}`
+	body := `{"name":"reconcile","node_ids":["` + nodeID + `"]}`
 	req := jsonReq("POST", "/admin/v1/machine-tokens", body)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -122,7 +115,7 @@ func TestAdminMachineTokenLifecycle(t *testing.T) {
 	assert.Equal(t, "machine_token.create", entries[0].Action)
 	assert.Equal(t, id, entries[0].ResourceID)
 
-	// The minted token actually vends the policy's secret via the public endpoint.
+	// The minted token actually vends the attached secret via the public endpoint.
 	ph := NewPublicHandler(env.db, env.audit, env.oidc)
 	pmux := chi.NewRouter()
 	ph.Register(pmux)
@@ -135,12 +128,13 @@ func TestAdminMachineTokenLifecycle(t *testing.T) {
 	require.NoError(t, json.Unmarshal(prr.Body.Bytes(), &vended))
 	assert.Equal(t, "y", vended["X"])
 
-	// Listing shows it by name/prefix but never leaks the full token.
+	// Listing shows it by name plus its granted secret, but never the full token.
 	req = httptest.NewRequest("GET", "/admin/v1/machine-tokens", nil)
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	require.Equal(t, http.StatusOK, rr.Code)
 	assert.Contains(t, rr.Body.String(), "reconcile")
+	assert.Contains(t, rr.Body.String(), `"X"`, "the list includes the granted node")
 	assert.NotContains(t, rr.Body.String(), token)
 
 	// Revoke it.
@@ -150,25 +144,54 @@ func TestAdminMachineTokenLifecycle(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, rr.Code)
 }
 
-func TestAdminCreateMachineTokenMissingFields(t *testing.T) {
+func TestAdminUpdateMachineTokenNodes(t *testing.T) {
 	env := setup(t)
 	h := NewAdminHandler(env.db, env.audit)
 	mux := chi.NewRouter()
 	h.Register(mux)
 
-	req := jsonReq("POST", "/admin/v1/machine-tokens", `{"name":"x"}`)
+	aID := createSecret(t, env, "A", "1")
+	bID := createSecret(t, env, "B", "2")
+	_, rec, err := env.db.CreateMachineToken("t", []string{aID})
+	require.NoError(t, err)
+
+	// Replace the grant set with B.
+	req := jsonReq("PUT", "/admin/v1/machine-tokens/"+rec.ID, `{"node_ids":["`+bID+`"]}`)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusNoContent, rr.Code)
+
+	nodes, err := env.db.ListTokenNodes(rec.ID)
+	require.Nil(t, err)
+	require.Equal(t, 1, len(nodes))
+	assert.Equal(t, "B", nodes[0].Name)
+
+	// Unknown token id -> 404.
+	req = jsonReq("PUT", "/admin/v1/machine-tokens/00000000-0000-0000-0000-000000000000", `{"node_ids":[]}`)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+func TestAdminCreateMachineTokenMissingName(t *testing.T) {
+	env := setup(t)
+	h := NewAdminHandler(env.db, env.audit)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	req := jsonReq("POST", "/admin/v1/machine-tokens", `{"node_ids":[]}`)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
-func TestAdminCreateMachineTokenUnknownPolicy(t *testing.T) {
+func TestAdminCreateMachineTokenUnknownNode(t *testing.T) {
 	env := setup(t)
 	h := NewAdminHandler(env.db, env.audit)
 	mux := chi.NewRouter()
 	h.Register(mux)
 
-	body := `{"name":"x","policy_id":"00000000-0000-0000-0000-000000000000"}`
+	body := `{"name":"x","node_ids":["00000000-0000-0000-0000-000000000000"]}`
 	req := jsonReq("POST", "/admin/v1/machine-tokens", body)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)

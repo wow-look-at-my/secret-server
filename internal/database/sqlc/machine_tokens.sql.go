@@ -11,6 +11,20 @@ import (
 	"time"
 )
 
+const attachNodeToToken = `-- name: AttachNodeToToken :exec
+INSERT OR IGNORE INTO machine_token_nodes (token_id, node_id) VALUES (?, ?)
+`
+
+type AttachNodeToTokenParams struct {
+	TokenID string
+	NodeID  string
+}
+
+func (q *Queries) AttachNodeToToken(ctx context.Context, arg AttachNodeToTokenParams) error {
+	_, err := q.db.ExecContext(ctx, attachNodeToToken, arg.TokenID, arg.NodeID)
+	return err
+}
+
 const countMachineTokens = `-- name: CountMachineTokens :one
 SELECT COUNT(*) FROM machine_tokens
 `
@@ -23,8 +37,8 @@ func (q *Queries) CountMachineTokens(ctx context.Context) (int64, error) {
 }
 
 const createMachineToken = `-- name: CreateMachineToken :exec
-INSERT INTO machine_tokens (id, name, token_hash, token_prefix, policy_id, created_at)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO machine_tokens (id, name, token_hash, token_prefix, created_at)
+VALUES (?, ?, ?, ?, ?)
 `
 
 type CreateMachineTokenParams struct {
@@ -32,7 +46,6 @@ type CreateMachineTokenParams struct {
 	Name        string
 	TokenHash   string
 	TokenPrefix string
-	PolicyID    string
 	CreatedAt   time.Time
 }
 
@@ -42,7 +55,6 @@ func (q *Queries) CreateMachineToken(ctx context.Context, arg CreateMachineToken
 		arg.Name,
 		arg.TokenHash,
 		arg.TokenPrefix,
-		arg.PolicyID,
 		arg.CreatedAt,
 	)
 	return err
@@ -56,19 +68,52 @@ func (q *Queries) DeleteMachineToken(ctx context.Context, id string) (sql.Result
 	return q.db.ExecContext(ctx, deleteMachineToken, id)
 }
 
+const deleteTokenNodes = `-- name: DeleteTokenNodes :exec
+DELETE FROM machine_token_nodes WHERE token_id = ?
+`
+
+func (q *Queries) DeleteTokenNodes(ctx context.Context, tokenID string) error {
+	_, err := q.db.ExecContext(ctx, deleteTokenNodes, tokenID)
+	return err
+}
+
+const getMachineToken = `-- name: GetMachineToken :one
+SELECT id, name, token_prefix, created_at, last_used_at
+FROM machine_tokens
+WHERE id = ?
+`
+
+type GetMachineTokenRow struct {
+	ID          string
+	Name        string
+	TokenPrefix string
+	CreatedAt   time.Time
+	LastUsedAt  sql.NullTime
+}
+
+func (q *Queries) GetMachineToken(ctx context.Context, id string) (GetMachineTokenRow, error) {
+	row := q.db.QueryRowContext(ctx, getMachineToken, id)
+	var i GetMachineTokenRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.TokenPrefix,
+		&i.CreatedAt,
+		&i.LastUsedAt,
+	)
+	return i, err
+}
+
 const getMachineTokenByHash = `-- name: GetMachineTokenByHash :one
-SELECT t.id, t.name, t.token_prefix, t.policy_id, p.name AS policy_name, t.created_at, t.last_used_at
-FROM machine_tokens t
-JOIN access_policies p ON p.id = t.policy_id
-WHERE t.token_hash = ?
+SELECT id, name, token_prefix, created_at, last_used_at
+FROM machine_tokens
+WHERE token_hash = ?
 `
 
 type GetMachineTokenByHashRow struct {
 	ID          string
 	Name        string
 	TokenPrefix string
-	PolicyID    string
-	PolicyName  string
 	CreatedAt   time.Time
 	LastUsedAt  sql.NullTime
 }
@@ -80,8 +125,6 @@ func (q *Queries) GetMachineTokenByHash(ctx context.Context, tokenHash string) (
 		&i.ID,
 		&i.Name,
 		&i.TokenPrefix,
-		&i.PolicyID,
-		&i.PolicyName,
 		&i.CreatedAt,
 		&i.LastUsedAt,
 	)
@@ -89,18 +132,15 @@ func (q *Queries) GetMachineTokenByHash(ctx context.Context, tokenHash string) (
 }
 
 const listMachineTokens = `-- name: ListMachineTokens :many
-SELECT t.id, t.name, t.token_prefix, t.policy_id, p.name AS policy_name, t.created_at, t.last_used_at
-FROM machine_tokens t
-JOIN access_policies p ON p.id = t.policy_id
-ORDER BY t.created_at DESC
+SELECT id, name, token_prefix, created_at, last_used_at
+FROM machine_tokens
+ORDER BY created_at DESC
 `
 
 type ListMachineTokensRow struct {
 	ID          string
 	Name        string
 	TokenPrefix string
-	PolicyID    string
-	PolicyName  string
 	CreatedAt   time.Time
 	LastUsedAt  sql.NullTime
 }
@@ -118,11 +158,46 @@ func (q *Queries) ListMachineTokens(ctx context.Context) ([]ListMachineTokensRow
 			&i.ID,
 			&i.Name,
 			&i.TokenPrefix,
-			&i.PolicyID,
-			&i.PolicyName,
 			&i.CreatedAt,
 			&i.LastUsedAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTokenNodes = `-- name: ListTokenNodes :many
+SELECT sn.id, sn.kind, sn.name
+FROM machine_token_nodes mtn
+JOIN secret_nodes sn ON sn.id = mtn.node_id
+WHERE mtn.token_id = ?
+ORDER BY sn.kind DESC, sn.name
+`
+
+type ListTokenNodesRow struct {
+	ID   string
+	Kind string
+	Name string
+}
+
+func (q *Queries) ListTokenNodes(ctx context.Context, tokenID string) ([]ListTokenNodesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listTokenNodes, tokenID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTokenNodesRow
+	for rows.Next() {
+		var i ListTokenNodesRow
+		if err := rows.Scan(&i.ID, &i.Kind, &i.Name); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

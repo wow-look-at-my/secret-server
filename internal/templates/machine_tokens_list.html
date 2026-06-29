@@ -5,7 +5,7 @@
     <h1>Machine Tokens</h1>
     <a href="{{prefix}}/machine-tokens/new" class="btn btn-primary">New Machine Token</a>
 </div>
-<p class="page-desc">Bearer credentials for clients that can't present a GitHub Actions OIDC token (e.g. webhook-runner hooks). Each token is bound to a policy and vends that policy's secrets via <code>GET /github/v1/secrets</code>. Only the hash is stored — the value is shown once, at creation.</p>
+<p class="page-desc">Bearer credentials for clients that can't present a GitHub Actions OIDC token (e.g. webhook-runner hooks). Each token attaches directly to secrets and vends them via <code>GET /github/v1/secrets</code> &mdash; no policy. Only the hash is stored; the value is shown once, at creation.</p>
 
 {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
 
@@ -15,7 +15,7 @@
         <tr>
             <th>Name</th>
             <th>Token</th>
-            <th>Policy</th>
+            <th>Secrets</th>
             <th>Created</th>
             <th>Last Used</th>
             <th>Actions</th>
@@ -26,10 +26,11 @@
         <tr>
             <td>{{.Name}}</td>
             <td><code>{{.TokenPrefix}}…</code></td>
-            <td>{{.PolicyName}}</td>
+            <td>{{range .Nodes}}<span class="chip kind-{{.Kind}}" title="{{.Kind}}">{{.Name}}</span> {{else}}<span class="empty">none</span>{{end}}</td>
             <td>{{.CreatedAt.Format "2006-01-02 15:04"}}</td>
             <td>{{if .LastUsedAt}}{{.LastUsedAt.Format "2006-01-02 15:04"}}{{else}}<span class="empty">never</span>{{end}}</td>
             <td>
+                <a href="{{prefix}}/machine-tokens/{{.ID}}/edit" class="btn btn-sm">Edit</a>
                 <form class="inline" method="post" action="{{prefix}}/machine-tokens/{{.ID}}/delete" onsubmit="return confirm('Revoke this machine token? Any client using it will immediately lose access.')">
                     {{with csrfToken}}<input type="hidden" name="csrf_token" value="{{.}}">{{end}}
                     <button type="submit" class="btn btn-sm btn-danger">Revoke</button>

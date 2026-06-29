@@ -1,37 +1,46 @@
 {{template "head" .}}
-{{define "title"}}New Machine Token - Secret Server{{end}}
+{{define "title"}}{{if .IsNew}}New Machine Token{{else}}Edit Machine Token{{end}} - Secret Server{{end}}
 
-<h1>New Machine Token</h1>
+<h1>{{if .IsNew}}New Machine Token{{else}}Edit Machine Token{{end}}</h1>
 
 {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
 
-<form method="post" action="{{prefix}}/machine-tokens">
+<form method="post" action="{{if .IsNew}}{{prefix}}/machine-tokens{{else}}{{prefix}}/machine-tokens/{{.Token.ID}}{{end}}">
     {{with csrfToken}}<input type="hidden" name="csrf_token" value="{{.}}">{{end}}
+
     <div class="form-group">
         <label for="name">Name</label>
+        {{if .IsNew}}
         <input type="text" id="name" name="name" required
             value="{{if .Form}}{{index .Form "name" 0}}{{end}}"
             placeholder="e.g. pr-minder-reconcile">
         <div class="hint">A label so you can recognize this token in the list and the audit log. Not secret.</div>
+        {{else}}
+        <input type="text" id="name" value="{{.Token.Name}}" readonly>
+        <div class="hint">The name is fixed once created. To rename, revoke this token and create a new one.</div>
+        {{end}}
     </div>
 
     <div class="form-group">
-        <label for="policy_id">Policy</label>
-        {{if .Policies}}
-        <select id="policy_id" name="policy_id" required>
-            <option value="">-- Select Policy --</option>
-            {{range .Policies}}
-            <option value="{{.ID}}">{{.Name}}</option>
+        <label>Secrets this token can read</label>
+        {{if .Nodes}}
+        <div class="checklist">
+            {{range .Nodes}}
+            <label class="check">
+                <input type="checkbox" name="node_ids" value="{{.ID}}" {{if .Selected}}checked{{end}}>
+                <span class="kind kind-{{.Kind}}">{{.Kind}}</span>
+                <code>{{.Path}}</code>
+            </label>
             {{end}}
-        </select>
+        </div>
+        <div class="hint">Check each secret this token may fetch. Checking a <strong>group</strong> grants every secret beneath it. The token vends exactly these on <code>GET /github/v1/secrets</code> &mdash; no repo/ref/actor patterns, no policy.</div>
         {{else}}
-        <p class="no-env">No policies defined yet. <a href="{{prefix}}/policies/new">Create one</a> first.</p>
+        <p class="no-env">No secrets defined yet. <a href="{{prefix}}/secrets/new">Create one</a> first.</p>
         {{end}}
-        <div class="hint">The token vends exactly the secrets this policy authorizes (a policy attached to a group grants its whole subtree). The policy's repo/ref/actor patterns are not consulted for a machine token. <a href="{{prefix}}/policies">Manage policies</a>.</div>
     </div>
 
     <div class="actions">
-        <button type="submit" class="btn btn-primary">Create</button>
+        <button type="submit" class="btn btn-primary">{{if .IsNew}}Create{{else}}Save{{end}}</button>
         <a href="{{prefix}}/machine-tokens" class="btn">Cancel</a>
     </div>
 </form>

@@ -62,10 +62,81 @@ func (d *DB) migrate() error {
 		return nil
 	}
 
+	// Drop the legacy machine_tokens.policy_id column if an earlier schema
+	// version created it (machine tokens now attach directly to secret nodes).
+	// Runs before createCompositeSchema so the IF-NOT-EXISTS machine_token_nodes
+	// table is created against the rebuilt machine_tokens.
+	if err := d.migrateMachineTokensDropPolicy(); err != nil {
+		return fmt.Errorf("migrate machine tokens: %w", err)
+	}
+
 	// Fresh install or already on the composite schema — create tables with
 	// the current schema (IF NOT EXISTS makes this idempotent).
 	if err := d.createCompositeSchema(d.db); err != nil {
 		return fmt.Errorf("create schema: %w", err)
+	}
+	return nil
+}
+
+// columnExists reports whether table has a column named column. A missing
+// table simply yields false (PRAGMA table_info returns no rows for it).
+func (d *DB) columnExists(table, column string) (bool, error) {
+	rows, err := d.db.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notnull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
+// migrateMachineTokensDropPolicy rebuilds the machine_tokens table without the
+// legacy NOT NULL policy_id column when an earlier schema version created it.
+// Machine tokens now attach directly to secret nodes (machine_token_nodes), so
+// the policy binding is gone. The table is small and self-contained — the
+// rebuild copies the surviving columns and never touches secret_nodes, so no
+// secret data is at risk. No-op on a fresh DB (the column never existed) and on
+// an already-migrated one (idempotent). It runs before machine_token_nodes is
+// created, so nothing references machine_tokens when it is dropped.
+func (d *DB) migrateMachineTokensDropPolicy() error {
+	has, err := d.columnExists("machine_tokens", "policy_id")
+	if err != nil || !has {
+		return err
+	}
+	stmts := []string{
+		`DROP INDEX IF EXISTS idx_machine_tokens_policy`,
+		`CREATE TABLE machine_tokens_new (
+			id           TEXT PRIMARY KEY,
+			name         TEXT NOT NULL,
+			token_hash   TEXT NOT NULL UNIQUE,
+			token_prefix TEXT NOT NULL DEFAULT '',
+			created_at   DATETIME NOT NULL DEFAULT (datetime('now')),
+			last_used_at DATETIME
+		)`,
+		`INSERT INTO machine_tokens_new (id, name, token_hash, token_prefix, created_at, last_used_at)
+			SELECT id, name, token_hash, token_prefix, created_at, last_used_at FROM machine_tokens`,
+		`DROP TABLE machine_tokens`,
+		`ALTER TABLE machine_tokens_new RENAME TO machine_tokens`,
+	}
+	for _, s := range stmts {
+		if _, err := d.db.Exec(s); err != nil {
+			return fmt.Errorf("rebuild machine_tokens: %w", err)
+		}
 	}
 	return nil
 }
@@ -138,11 +209,20 @@ func (d *DB) createCompositeSchema(exec sqlExecer) error {
 			name         TEXT NOT NULL,
 			token_hash   TEXT NOT NULL UNIQUE,
 			token_prefix TEXT NOT NULL DEFAULT '',
-			policy_id    TEXT NOT NULL REFERENCES access_policies(id) ON DELETE CASCADE,
 			created_at   DATETIME NOT NULL DEFAULT (datetime('now')),
 			last_used_at DATETIME
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_machine_tokens_policy ON machine_tokens(policy_id)`,
+		// A machine token grants secrets by attaching directly to secret-tree
+		// nodes (a leaf or a group); attaching a group grants its whole
+		// subtree, resolved by the same recursive CTE the OIDC path uses. No
+		// policy / pattern indirection — a token simply lists the nodes it may
+		// read.
+		`CREATE TABLE IF NOT EXISTS machine_token_nodes (
+			token_id TEXT NOT NULL REFERENCES machine_tokens(id) ON DELETE CASCADE,
+			node_id  TEXT NOT NULL REFERENCES secret_nodes(id)   ON DELETE CASCADE,
+			PRIMARY KEY (token_id, node_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_machine_token_nodes_node ON machine_token_nodes(node_id)`,
 	}
 	for _, s := range stmts {
 		if _, err := exec.ExecContext(context.Background(), s); err != nil {

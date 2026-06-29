@@ -65,3 +65,23 @@ SELECT sn.id, sn.name, sn.value
 FROM secret_nodes sn
 JOIN authorized a ON sn.id = a.id
 WHERE sn.kind = 'secret';
+
+-- AuthorizedSecretsForToken returns every leaf secret a machine token may read:
+-- the nodes attached to it directly, plus the whole subtree beneath any group
+-- it is attached to. Same downward walk as AuthorizedSecrets, seeded from
+-- machine_token_nodes instead of secret_node_policies.
+--
+-- name: AuthorizedSecretsForToken :many
+WITH RECURSIVE authorized(id) AS (
+    SELECT mtn.node_id
+    FROM machine_token_nodes mtn
+    WHERE mtn.token_id = ?
+    UNION
+    SELECT sn.id
+    FROM secret_nodes sn
+    JOIN authorized a ON sn.parent_id = a.id
+)
+SELECT sn.id, sn.name, sn.value
+FROM secret_nodes sn
+JOIN authorized a ON sn.id = a.id
+WHERE sn.kind = 'secret';

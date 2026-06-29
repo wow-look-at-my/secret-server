@@ -118,12 +118,12 @@ On upgrade from an older schema that used `environments`/`secrets`/`access_polic
 
 ## Machine Tokens
 
-GitHub Actions OIDC is the right credential for a workflow, but some clients can't present an OIDC token — e.g. a [webhook-runner](https://github.com/wow-look-at-my/webhook-runner) hook running in a plain Docker container. **Machine tokens** fill that gap: a long-lived bearer credential, bound to one **policy**, that a non-Actions client presents to the *same* `GET /github/v1/secrets` endpoint.
+GitHub Actions OIDC is the right credential for a workflow, but some clients can't present an OIDC token — e.g. a [webhook-runner](https://github.com/wow-look-at-my/webhook-runner) hook running in a plain Docker container. **Machine tokens** fill that gap: a long-lived bearer credential that **grants a chosen set of secrets directly** (no policy), presented to the *same* `GET /github/v1/secrets` endpoint.
 
 - **Shape:** `sst_<random>`. The server inspects the bearer token — the `sst_` prefix routes it to machine-token validation; anything else is validated as an OIDC JWT. Both share one route, so there is no extra Cloudflare Access bypass path to configure.
 - **Storage:** only the token's SHA-256 hash is stored. The plaintext is shown **once**, at creation, and cannot be recovered — lose it and you revoke + reissue.
-- **Access:** a machine token vends exactly the secrets its bound policy authorizes — the same `AuthorizedSecrets` resolution the OIDC path uses (a policy attached to a group grants every descendant leaf). The token *is* the grant; the policy's repo/ref/actor patterns are not consulted for it. Scope a token by binding it to a policy attached only to the nodes that client needs. Deleting the policy cascades to (revokes) its tokens.
-- **Management:** create, list (by name + prefix), and revoke tokens on the **Machine Tokens** admin page, or via `POST/GET/DELETE /admin/v1/machine-tokens` (create takes `{name, policy_id}` and returns `{id, token}` — the only time the token is exposed).
+- **Access:** a machine token attaches **directly to secret-tree nodes** — pick the exact secrets (or a group, which grants its whole subtree) the client needs; no policy and no repo/ref/actor patterns are involved. The token *is* the grant. Vending uses the same downward-walk resolution as the OIDC path, seeded from the token's attachments. Deleting a secret (or the token) cascades the attachment away.
+- **Management:** create, list (by name + prefix, showing the granted secrets), edit (change the attached secrets), and revoke on the **Machine Tokens** admin page, or via `GET/POST/PUT/DELETE /admin/v1/machine-tokens` (create/update take `{name, node_ids}`; create returns `{id, token}` — the only time the token is exposed).
 - **Audit:** every machine-token vend is recorded as `secret.access.granted` with actor type `machine_token`; denied attempts (unknown/revoked token) as `secret.access.denied`.
 
 ```bash
