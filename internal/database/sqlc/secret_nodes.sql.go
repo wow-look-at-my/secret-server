@@ -70,6 +70,62 @@ func (q *Queries) AuthorizedSecrets(ctx context.Context, policyIds []string) ([]
 	return items, nil
 }
 
+const authorizedSecretsForToken = `-- name: AuthorizedSecretsForToken :many
+WITH RECURSIVE authorized(id) AS (
+    SELECT mtn.node_id
+    FROM machine_token_nodes mtn
+    WHERE mtn.token_id = ?1
+    UNION
+    SELECT snp.node_id
+    FROM secret_node_policies snp
+    JOIN machine_tokens mt ON mt.policy_id = snp.policy_id
+    WHERE mt.id = ?1
+    UNION
+    SELECT sn.id
+    FROM secret_nodes sn
+    JOIN authorized a ON sn.parent_id = a.id
+)
+SELECT sn.id, sn.name, sn.value
+FROM secret_nodes sn
+JOIN authorized a ON sn.id = a.id
+WHERE sn.kind = 'secret'
+`
+
+type AuthorizedSecretsForTokenRow struct {
+	ID    string
+	Name  string
+	Value []byte
+}
+
+// AuthorizedSecretsForToken returns every leaf secret a machine token may read:
+// the union of its direct node attachments (machine_token_nodes) and the nodes
+// granted by its optional bound policy (secret_node_policies via policy_id),
+// each expanded down through any attached group's subtree. Same downward walk as
+// AuthorizedSecrets, just seeded from both sources; a token with no policy
+// contributes nothing from the policy branch.
+func (q *Queries) AuthorizedSecretsForToken(ctx context.Context, tokenID string) ([]AuthorizedSecretsForTokenRow, error) {
+	rows, err := q.db.QueryContext(ctx, authorizedSecretsForToken, tokenID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuthorizedSecretsForTokenRow
+	for rows.Next() {
+		var i AuthorizedSecretsForTokenRow
+		if err := rows.Scan(&i.ID, &i.Name, &i.Value); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countNodesByKind = `-- name: CountNodesByKind :one
 SELECT COUNT(*) FROM secret_nodes WHERE kind = ?
 `

@@ -63,23 +63,20 @@ func (h *UIHandler) editPolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 // parsePolicyPatternsForm extracts and validates the three pattern lists
-// from an access-policy form submission. Empty ref/actor lists default to
-// ["*"] so the common "allow any ref / any actor" case still works without
-// the user typing it. An empty repository list is allowed: it produces a
-// policy with no repository patterns, which matches nothing (the repository
-// inner JOIN in MatchingPolicyIDs yields no rows) and therefore grants no
-// access. That fail-closed behaviour is what makes it safe to create an
-// empty policy now and fill in patterns later.
+// from an access-policy form submission. No kind defaults to ["*"]: an empty
+// list of any kind is stored as-is and matches nothing (its inner JOIN in
+// MatchingPolicyIDs yields no rows), so the policy is fail-closed — it grants
+// no access until patterns are added, and "*" must be written explicitly.
+// This is what stops a blank ref/actor from silently widening a policy to
+// "any ref / any actor" (a dangerous default on a policy that grants
+// high-value secrets like a GitHub App private key). It also lets a
+// placeholder policy be saved now and filled in later, and matches the
+// machine-token policies whose patterns are intentionally left empty (they
+// are never consulted on the machine-token vend path).
 func parsePolicyPatternsForm(r *http.Request) (repo, ref, actor []string, err error) {
 	repo = parsePatternLines(r.FormValue("repository_patterns"))
 	ref = parsePatternLines(r.FormValue("ref_patterns"))
 	actor = parsePatternLines(r.FormValue("actor_patterns"))
-	if len(ref) == 0 {
-		ref = []string{"*"}
-	}
-	if len(actor) == 0 {
-		actor = []string{"*"}
-	}
 	for _, list := range [][]string{repo, ref, actor} {
 		if err := database.ValidatePatterns(list); err != nil {
 			return nil, nil, nil, err
