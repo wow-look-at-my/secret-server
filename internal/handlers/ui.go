@@ -60,6 +60,12 @@ func (h *UIHandler) Register(r chi.Router) {
 	r.Post(p+"/policies/{id}", h.updatePolicy)
 	r.Post(p+"/policies/{id}/delete", h.deletePolicyForm)
 
+	// Machine tokens. Handlers live in ui_machine_tokens.go.
+	r.Get(p+"/machine-tokens", h.listMachineTokens)
+	r.Get(p+"/machine-tokens/new", h.newMachineToken)
+	r.Post(p+"/machine-tokens", h.createMachineToken)
+	r.Post(p+"/machine-tokens/{id}/delete", h.deleteMachineTokenForm)
+
 	r.Get(p+"/audit", h.auditLog)
 	r.Get(p+"/style.css", h.tmpl.ServeCSS)
 

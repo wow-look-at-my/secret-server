@@ -133,6 +133,16 @@ func (d *DB) createCompositeSchema(exec sqlExecer) error {
 			CHECK (policy_id != depends_on_id)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_policy_precedence_dep ON policy_precedence(node_id, depends_on_id)`,
+		`CREATE TABLE IF NOT EXISTS machine_tokens (
+			id           TEXT PRIMARY KEY,
+			name         TEXT NOT NULL,
+			token_hash   TEXT NOT NULL UNIQUE,
+			token_prefix TEXT NOT NULL DEFAULT '',
+			policy_id    TEXT NOT NULL REFERENCES access_policies(id) ON DELETE CASCADE,
+			created_at   DATETIME NOT NULL DEFAULT (datetime('now')),
+			last_used_at DATETIME
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_machine_tokens_policy ON machine_tokens(policy_id)`,
 	}
 	for _, s := range stmts {
 		if _, err := exec.ExecContext(context.Background(), s); err != nil {
