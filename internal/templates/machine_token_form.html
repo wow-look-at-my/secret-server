@@ -1,0 +1,39 @@
+{{template "head" .}}
+{{define "title"}}New Machine Token - Secret Server{{end}}
+
+<h1>New Machine Token</h1>
+
+{{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+
+<form method="post" action="{{prefix}}/machine-tokens">
+    {{with csrfToken}}<input type="hidden" name="csrf_token" value="{{.}}">{{end}}
+    <div class="form-group">
+        <label for="name">Name</label>
+        <input type="text" id="name" name="name" required
+            value="{{if .Form}}{{index .Form "name" 0}}{{end}}"
+            placeholder="e.g. pr-minder-reconcile">
+        <div class="hint">A label so you can recognize this token in the list and the audit log. Not secret.</div>
+    </div>
+
+    <div class="form-group">
+        <label for="policy_id">Policy</label>
+        {{if .Policies}}
+        <select id="policy_id" name="policy_id" required>
+            <option value="">-- Select Policy --</option>
+            {{range .Policies}}
+            <option value="{{.ID}}">{{.Name}}</option>
+            {{end}}
+        </select>
+        {{else}}
+        <p class="no-env">No policies defined yet. <a href="{{prefix}}/policies/new">Create one</a> first.</p>
+        {{end}}
+        <div class="hint">The token vends exactly the secrets this policy authorizes (a policy attached to a group grants its whole subtree). The policy's repo/ref/actor patterns are not consulted for a machine token. <a href="{{prefix}}/policies">Manage policies</a>.</div>
+    </div>
+
+    <div class="actions">
+        <button type="submit" class="btn btn-primary">Create</button>
+        <a href="{{prefix}}/machine-tokens" class="btn">Cancel</a>
+    </div>
+</form>
+
+{{template "foot" .}}
