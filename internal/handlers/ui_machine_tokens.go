@@ -157,10 +157,8 @@ func (h *UIHandler) createMachineToken(w http.ResponseWriter, r *http.Request) {
 		renderErr("Name is required.")
 		return
 	}
-	if policyID == nil && len(nodeIDs) == 0 {
-		renderErr("Grant the token something: pick at least one secret or group, or bind a policy.")
-		return
-	}
+	// A token may be created with nothing attached — it simply vends nothing
+	// until secrets and/or a policy are added later.
 
 	token, rec, err := h.db.CreateMachineToken(name, policyID, nodeIDs)
 	if err != nil {
@@ -236,10 +234,8 @@ func (h *UIHandler) updateMachineTokenForm(w http.ResponseWriter, r *http.Reques
 			selectedSet(nodeIDs), derefString(policyID))
 	}
 
-	if policyID == nil && len(nodeIDs) == 0 {
-		renderErr("Grant the token something: pick at least one secret or group, or bind a policy.")
-		return
-	}
+	// Clearing all attachments is allowed — the token then vends nothing until
+	// secrets and/or a policy are added again.
 	if err := h.db.UpdateMachineToken(id, policyID, nodeIDs); err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			renderErr("The selected policy or secret no longer exists. Reload and try again.")
