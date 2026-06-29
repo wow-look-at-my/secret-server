@@ -262,12 +262,15 @@ func TestAdminCreatePolicyEmptyRepoPatternsAllowed(t *testing.T) {
 	assert.Empty(t, policies[0].RepositoryPatterns)
 }
 
-func TestAdminCreatePolicyDefaultRefActor(t *testing.T) {
+func TestAdminCreatePolicyEmptyRefActorStayEmpty(t *testing.T) {
 	env := setup(t)
 	h := NewAdminHandler(env.db, env.audit)
 	mux := chi.NewRouter()
 	h.Register(mux)
 
+	// Omitting ref/actor must NOT silently widen the policy to "*": each kind
+	// stays empty (fail-closed), so a blank can never grant any-ref/any-actor.
+	// "*" has to be written explicitly.
 	body := `{"name":"test","repository_patterns":["org/*"]}`
 	req := jsonReq("POST", "/admin/v1/policies", body)
 	rr := httptest.NewRecorder()
@@ -276,8 +279,8 @@ func TestAdminCreatePolicyDefaultRefActor(t *testing.T) {
 
 	policies, _ := env.db.ListPolicies()
 	require.Equal(t, 1, len(policies))
-	assert.Equal(t, []string{"*"}, policies[0].RefPatterns)
-	assert.Equal(t, []string{"*"}, policies[0].ActorPatterns)
+	assert.Empty(t, policies[0].RefPatterns)
+	assert.Empty(t, policies[0].ActorPatterns)
 }
 
 func TestAdminCreatePolicyInvalidGlob(t *testing.T) {
