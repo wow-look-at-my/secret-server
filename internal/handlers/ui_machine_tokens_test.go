@@ -78,16 +78,19 @@ func TestUIMachineTokenCreateValidation(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rr.Code)
 	assert.Contains(t, rr.Body.String(), "Name is required")
 
-	// No secret selected re-renders with an error.
-	req = httptest.NewRequest("POST", "/admin/machine-tokens", strings.NewReader("name=x"))
+	// Name only, no secret and no policy: an unattached token is allowed
+	// (it simply vends nothing until you attach something later).
+	req = httptest.NewRequest("POST", "/admin/machine-tokens", strings.NewReader("name=unattached"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
-	assert.Equal(t, http.StatusOK, rr.Code)
-	assert.Contains(t, rr.Body.String(), "at least one secret")
+	require.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Body.String(), "sst_", "an unattached token is created and shown")
 
 	tokens, _ := env.db.ListMachineTokens()
-	assert.Equal(t, 0, len(tokens))
+	require.Equal(t, 1, len(tokens))
+	nodes, _ := env.db.ListTokenNodes(tokens[0].ID)
+	assert.Empty(t, nodes, "the token has no attachments")
 }
 
 func TestUIMachineTokenEditAndUpdate(t *testing.T) {
@@ -121,7 +124,7 @@ func TestUIMachineTokenEditAndUpdate(t *testing.T) {
 	assert.Equal(t, "B", nodes[0].Name)
 }
 
-func TestUIMachineTokenUpdateRequiresASecret(t *testing.T) {
+func TestUIMachineTokenUpdateCanClearAttachments(t *testing.T) {
 	env := setup(t)
 	s, _ := env.db.CreateSecret(nil, "S", "v")
 	_, rec, err := env.db.CreateMachineToken("t", nil, []string{s.ID()})
@@ -131,16 +134,16 @@ func TestUIMachineTokenUpdateRequiresASecret(t *testing.T) {
 	mux := chi.NewRouter()
 	h.Register(mux)
 
-	// Posting no nodes re-renders the form with an error and leaves the grant.
+	// Posting no nodes and no policy clears the grant and redirects (an
+	// unattached token is allowed).
 	req := httptest.NewRequest("POST", "/admin/machine-tokens/"+rec.ID, strings.NewReader("name=t"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
-	assert.Equal(t, http.StatusOK, rr.Code)
-	assert.Contains(t, rr.Body.String(), "at least one secret")
+	assert.Equal(t, http.StatusSeeOther, rr.Code)
 
 	nodes, _ := env.db.ListTokenNodes(rec.ID)
-	assert.Equal(t, 1, len(nodes), "the prior grant is untouched")
+	assert.Empty(t, nodes, "the attachments were cleared")
 }
 
 func TestUIEditNonexistentMachineToken(t *testing.T) {
