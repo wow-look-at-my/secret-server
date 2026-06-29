@@ -26,6 +26,16 @@ type AuditLog struct {
 	Details      string
 }
 
+type MachineToken struct {
+	ID          string
+	Name        string
+	TokenHash   string
+	TokenPrefix string
+	PolicyID    string
+	CreatedAt   time.Time
+	LastUsedAt  sql.NullTime
+}
+
 type PolicyPattern struct {
 	PolicyID string
 	Kind     string

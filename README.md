@@ -6,9 +6,9 @@ Self-hosted secrets manager for homelab use. Single Go binary with SQLite storag
 
 | Zone | Routes | Auth | Access |
 |------|--------|------|--------|
-| GitHub API | `GET /github/v1/secrets` | GitHub Actions OIDC JWT | Read-only — vend authorized secrets |
-| Admin API | `/admin/v1/*` | Cloudflare Access JWT | Manage the secret tree, policies, and attachments |
-| Admin UI | `/admin/*` | Cloudflare Access JWT | Web UI for the secret tree, policies, and attachments |
+| GitHub API | `GET /github/v1/secrets` | GitHub Actions OIDC JWT **or** machine token | Read-only — vend authorized secrets |
+| Admin API | `/admin/v1/*` | Cloudflare Access JWT | Manage the secret tree, policies, attachments, and machine tokens |
+| Admin UI | `/admin/*` | Cloudflare Access JWT | Web UI for the secret tree, policies, attachments, and machine tokens |
 
 Two path prefixes for Cloudflare Access: protect `/admin/*`, bypass `/github/*`. The GitHub API validates OIDC tokens directly. Admin routes are protected by Cloudflare Access (the server validates CF JWTs as defense-in-depth). The root path `/` redirects to the admin UI. `GET /health` is available for Docker/uptime checks (not routed through CF Access).
 
@@ -115,6 +115,22 @@ Policies can optionally have **precedence edges** per node — directed "policy 
 ### Legacy migration
 
 On upgrade from an older schema that used `environments`/`secrets`/`access_policies` tables, the server automatically flattens every old secret into a single root-level leaf with name `<project>-<environment>-<key>`. No groups are created; you reorganize the flat list into a tree after upgrade. Existing policies are preserved with their patterns normalized into `policy_patterns`, but **attachments are not carried over** and legacy empty-list-as-wildcard is not synthesized — this is deliberate, to force a conscious re-review of authorization on the new model. Unattached nodes show a "no policies" indicator in the admin UI so the unauthorized state is obvious at a glance.
+
+## Machine Tokens
+
+GitHub Actions OIDC is the right credential for a workflow, but some clients can't present an OIDC token — e.g. a [webhook-runner](https://github.com/wow-look-at-my/webhook-runner) hook running in a plain Docker container. **Machine tokens** fill that gap: a long-lived bearer credential, bound to one **policy**, that a non-Actions client presents to the *same* `GET /github/v1/secrets` endpoint.
+
+- **Shape:** `sst_<random>`. The server inspects the bearer token — the `sst_` prefix routes it to machine-token validation; anything else is validated as an OIDC JWT. Both share one route, so there is no extra Cloudflare Access bypass path to configure.
+- **Storage:** only the token's SHA-256 hash is stored. The plaintext is shown **once**, at creation, and cannot be recovered — lose it and you revoke + reissue.
+- **Access:** a machine token vends exactly the secrets its bound policy authorizes — the same `AuthorizedSecrets` resolution the OIDC path uses (a policy attached to a group grants every descendant leaf). The token *is* the grant; the policy's repo/ref/actor patterns are not consulted for it. Scope a token by binding it to a policy attached only to the nodes that client needs. Deleting the policy cascades to (revokes) its tokens.
+- **Management:** create, list (by name + prefix), and revoke tokens on the **Machine Tokens** admin page, or via `POST/GET/DELETE /admin/v1/machine-tokens` (create takes `{name, policy_id}` and returns `{id, token}` — the only time the token is exposed).
+- **Audit:** every machine-token vend is recorded as `secret.access.granted` with actor type `machine_token`; denied attempts (unknown/revoked token) as `secret.access.denied`.
+
+```bash
+curl -fsSL -H "Authorization: Bearer $SECRET_SERVER_TOKEN" \
+  https://secrets.example.com/github/v1/secrets
+# {"GITHUB_APP_PRIVATE_KEY":"-----BEGIN ...","AI_API_KEY":"..."}
+```
 
 ## Cloudflare Access Setup
 

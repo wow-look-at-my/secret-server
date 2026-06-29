@@ -66,3 +66,21 @@ CREATE TABLE IF NOT EXISTS policy_precedence (
 );
 
 CREATE INDEX IF NOT EXISTS idx_policy_precedence_dep ON policy_precedence(node_id, depends_on_id);
+
+-- Machine tokens: a bearer credential for clients that can't present a GitHub
+-- OIDC token (e.g. webhook-runner hooks). Each token is bound to one policy and
+-- vends exactly the secrets that policy authorizes (via AuthorizedSecrets), the
+-- same resolution the OIDC path uses. Only the SHA-256 hash is stored; the
+-- plaintext (sst_<random>) is shown once at creation. ON DELETE CASCADE: drop a
+-- policy and its tokens go with it.
+CREATE TABLE IF NOT EXISTS machine_tokens (
+    id           TEXT PRIMARY KEY,
+    name         TEXT NOT NULL,
+    token_hash   TEXT NOT NULL UNIQUE,
+    token_prefix TEXT NOT NULL DEFAULT '',
+    policy_id    TEXT NOT NULL REFERENCES access_policies(id) ON DELETE CASCADE,
+    created_at   DATETIME NOT NULL DEFAULT (datetime('now')),
+    last_used_at DATETIME
+);
+
+CREATE INDEX IF NOT EXISTS idx_machine_tokens_policy ON machine_tokens(policy_id);
