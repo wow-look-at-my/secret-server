@@ -294,6 +294,25 @@ func (d *DB) ListTokenNodes(tokenID string) ([]TokenNode, error) {
 	return out, nil
 }
 
+// MachineTokenSeedNodeIDs returns the set of secret-tree node IDs that any
+// machine token grants directly — the union of every token's direct
+// attachments and the nodes attached to any token's bound policy. This mirrors
+// the seed of AuthorizedSecretsForToken (without the per-token filter or the
+// downward subtree expansion); callers expand inheritance through the tree the
+// same way the effective-policy walk does. The returned map has the same shape
+// collectAttachedNodeIDs produces, so the UI can treat it identically.
+func (d *DB) MachineTokenSeedNodeIDs(ctx context.Context) (map[string]bool, error) {
+	rows, err := d.q.ListNodeIDsWithMachineToken(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list node ids with machine token: %w", err)
+	}
+	out := make(map[string]bool, len(rows))
+	for _, id := range rows {
+		out[id] = true
+	}
+	return out, nil
+}
+
 // AuthorizedSecretsForToken resolves every leaf secret a token may read — the
 // union of its directly-attached nodes and its optional bound policy's nodes,
 // each expanded through any attached group's subtree — and decrypts each value.
