@@ -21,12 +21,16 @@
     <div class="form-group">
         <label for="value">Value</label>
         <div class="input-wrap">
-            <input type="password" id="value" name="value" {{if .IsNew}}required{{end}}
-                value="{{if .IsNew}}{{else}}{{.Value}}{{end}}"
-                placeholder="{{if .IsNew}}Secret value{{else}}Leave blank to keep current value{{end}}">
+            <textarea id="value" name="value" rows="3" class="secret-value" style="-webkit-text-security:disc;"
+                {{if .IsNew}}required{{end}}
+                placeholder="{{if .IsNew}}Secret value (multi-line OK, e.g. a PEM private key){{else}}Leave blank to keep current value{{end}}">{{if not .IsNew}}{{.Value}}{{end}}</textarea>
             <button type="button" class="btn btn-sm" onclick="toggleValue()">Show</button>
         </div>
-        <div class="hint">The sensitive value to encrypt and store.</div>
+        <div class="hint">The sensitive value to encrypt and store. Multi-line values such as a PEM private key are supported &mdash; paste it exactly as-is, including the BEGIN/END lines.</div>
+        <div class="file-row">
+            <label class="file-label">Or load from a file: <input type="file" id="value-file" onchange="loadValueFile(this)"></label>
+            <div class="hint">Reads the file's text straight into the box above (e.g. the GitHub App <code>.pem</code> GitHub makes you download). It's read in your browser &mdash; nothing leaves the page until you submit the form.</div>
+        </div>
         {{if .JSONStructure}}
         <details class="json-details">
             <summary>Base64-encoded JSON detected — view decoded</summary>
@@ -60,13 +64,21 @@
 function toggleValue() {
     var el = document.getElementById('value');
     var btn = el.parentElement.querySelector('button');
-    if (el.type === 'password') {
-        el.type = 'text';
-        btn.textContent = 'Hide';
-    } else {
-        el.type = 'password';
+    if (el.style.webkitTextSecurity === 'none') {
+        el.style.webkitTextSecurity = 'disc';
         btn.textContent = 'Show';
+    } else {
+        el.style.webkitTextSecurity = 'none';
+        btn.textContent = 'Hide';
     }
+}
+function loadValueFile(input) {
+    var file = input.files && input.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () { document.getElementById('value').value = reader.result; };
+    reader.onerror = function () { alert('Could not read that file.'); };
+    reader.readAsText(file);
 }
 </script>
 {{end}}
