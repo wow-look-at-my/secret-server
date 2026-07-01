@@ -191,6 +191,44 @@ func (q *Queries) ListMachineTokens(ctx context.Context) ([]ListMachineTokensRow
 	return items, nil
 }
 
+const listNodeIDsWithMachineToken = `-- name: ListNodeIDsWithMachineToken :many
+SELECT node_id FROM machine_token_nodes
+UNION
+SELECT snp.node_id
+FROM secret_node_policies snp
+JOIN machine_tokens mt ON mt.policy_id = snp.policy_id
+`
+
+// ListNodeIDsWithMachineToken returns the SEED node IDs that any machine token
+// grants directly: its direct attachments (machine_token_nodes) plus the nodes
+// attached to any token's bound policy (secret_node_policies via policy_id). It
+// mirrors the seed of AuthorizedSecretsForToken (minus the per-token filter and
+// the downward subtree walk) so the admin UI can flag, on the secret tree, the
+// nodes a machine token reaches; the caller expands inheritance the same way the
+// effective-policy walk does.
+func (q *Queries) ListNodeIDsWithMachineToken(ctx context.Context) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listNodeIDsWithMachineToken)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var node_id string
+		if err := rows.Scan(&node_id); err != nil {
+			return nil, err
+		}
+		items = append(items, node_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTokenNodes = `-- name: ListTokenNodes :many
 SELECT sn.id, sn.kind, sn.name
 FROM machine_token_nodes mtn

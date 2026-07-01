@@ -55,6 +55,91 @@ func TestUIViewNode(t *testing.T) {
 	require.Equal(t, http.StatusOK, rr.Code)
 }
 
+// TestUIViewNodeMachineTokenBadge: a secret granted ONLY by a directly-attached
+// machine token shows the MACHINE TOKEN badge and NOT the "no policies" badge.
+func TestUIViewNodeMachineTokenBadge(t *testing.T) {
+	env := setup(t)
+
+	// A group so the secret renders inside the tree (the badge lives on the
+	// tree row, not the page header). Attach the token directly to the leaf.
+	g, _ := env.db.CreateGroup(nil, "grp")
+	gid := g.ID()
+	leaf, _ := env.db.CreateSecret(&gid, "TOKEN_ONLY", "v")
+	_, _, err := env.db.CreateMachineToken("t", nil, []string{leaf.ID()})
+	require.Nil(t, err)
+
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	// View the group so its child (the leaf) is rendered in the node tree.
+	req := httptest.NewRequest("GET", "/admin/secrets/"+gid, nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code)
+	body := rr.Body.String()
+	assert.Contains(t, body, "node-machine-token", "machine-token badge is rendered")
+	assert.Contains(t, body, "machine token")
+	assert.NotContains(t, body, "No policies attached at this node or any ancestor",
+		"the no-policies warning is suppressed for a machine-token-granted node")
+}
+
+// TestUIViewNodeNoPoliciesBadge: a node granted by neither a policy nor a
+// machine token still shows the "no policies" warning and no machine-token badge.
+func TestUIViewNodeNoPoliciesBadge(t *testing.T) {
+	env := setup(t)
+	g, _ := env.db.CreateGroup(nil, "grp")
+	gid := g.ID()
+	_, _ = env.db.CreateSecret(&gid, "UNREACHABLE", "v")
+
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	req := httptest.NewRequest("GET", "/admin/secrets/"+gid, nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code)
+	body := rr.Body.String()
+	assert.Contains(t, body, "No policies attached at this node or any ancestor",
+		"a node with no policy and no token shows the no-policies warning")
+	assert.NotContains(t, body, "node-machine-token")
+}
+
+// TestUIViewNodeMachineTokenViaBoundPolicyInherits: a leaf reached only because
+// a machine token's bound policy is attached to an ancestor group gets the badge
+// (inheritance mirrors the effective-policy walk) and loses the warning.
+func TestUIViewNodeMachineTokenViaBoundPolicyInherits(t *testing.T) {
+	env := setup(t)
+
+	root, _ := env.db.CreateGroup(nil, "root")
+	rootID := root.ID()
+	leaf, _ := env.db.CreateSecret(&rootID, "INHERITED", "v")
+
+	// Bind a policy to a token and attach that policy to the root group; the
+	// leaf is reachable only via inheritance down from the group.
+	p, _ := env.db.CreatePolicy("p", []string{"*"}, []string{"*"}, []string{"*"})
+	require.Nil(t, env.db.AttachPolicy(rootID, p.ID))
+	_, _, err := env.db.CreateMachineToken("bound", &p.ID, nil)
+	require.Nil(t, err)
+
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	// View the leaf directly: the ancestor walk must surface the badge even
+	// though the seed node (root) is outside the rendered subtree.
+	req := httptest.NewRequest("GET", "/admin/secrets/"+leaf.ID(), nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code)
+	body := rr.Body.String()
+	assert.Contains(t, body, "A machine token grants access to this",
+		"the leaf inherits machine-token access from its ancestor group")
+	assert.NotContains(t, body, "no effective policies",
+		"the no-effective-policies error is suppressed when a token grants it")
+}
+
 func TestUIViewNodeNotFound(t *testing.T) {
 	env := setup(t)
 	h := NewUIHandler(env.db, env.audit, env.tmpl)

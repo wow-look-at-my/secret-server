@@ -108,6 +108,7 @@ form.inline { display: inline; }
 .stat-card .value { font-size: 2rem; font-weight: 700; }
 .secret-value { font-family: monospace; }
 .error { background: var(--danger); color: #fff; padding: 0.75rem 1rem; border-radius: 4px; margin-bottom: 1rem; }
+.info { background: var(--accent); color: #fff; padding: 0.75rem 1rem; border-radius: 4px; margin-bottom: 1rem; }
 .empty { color: var(--muted); text-align: center; padding: 2rem; }
 .hint { font-size: 0.8rem; color: var(--muted); margin-top: 0.2rem; }
 .page-desc { color: var(--muted); margin-bottom: 1rem; margin-top: -0.5rem; }
@@ -147,6 +148,15 @@ footer .github-link svg { width: 1em; height: 1em; vertical-align: middle; }
 .node-unreachable > .node-row > a { color: var(--muted); }
 .node-warning {
     background: var(--danger);
+    color: #fff;
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+.node-machine-token {
+    background: var(--accent);
     color: #fff;
     font-size: 0.7rem;
     padding: 0.1rem 0.4rem;
