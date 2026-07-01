@@ -97,27 +97,34 @@ func uiActor(r *http.Request) string {
 // "HasEffectivePolicies" flags computed via a single downward walk so the
 // templates can flag unreachable nodes without any additional lookups.
 type nodeTemplateView struct {
-	ID                   string
-	Kind                 string // "secret" or "group"
-	Name                 string
-	Value                string
-	HasEffectivePolicies bool
-	Children             []*nodeTemplateView
-	ParentID             *string
+	ID                       string
+	Kind                     string // "secret" or "group"
+	Name                     string
+	Value                    string
+	HasEffectivePolicies     bool
+	HasEffectiveMachineToken bool
+	Children                 []*nodeTemplateView
+	ParentID                 *string
 }
 
 // buildTreeView walks a slice of root ISecretNodes and produces a tree of
-// nodeTemplateViews. HasEffectivePolicies on a node is true iff that node
-// or any of its ancestors has a directly-attached policy.
-func buildTreeView(roots []database.ISecretNode, attached map[string]bool) []*nodeTemplateView {
-	var visit func(n database.ISecretNode, ancestorHas bool) *nodeTemplateView
-	visit = func(n database.ISecretNode, ancestorHas bool) *nodeTemplateView {
+// nodeTemplateViews. HasEffectivePolicies on a node is true iff that node or
+// any of its ancestors has a directly-attached policy. HasEffectiveMachineToken
+// is computed identically, but seeded from machineTokenSeed — the set of nodes
+// a machine token grants directly (direct attachment or its bound policy) — so
+// the same node-or-ancestor inheritance rule applies to both. machineTokenSeed
+// may be nil (no machine-token highlighting).
+func buildTreeView(roots []database.ISecretNode, attached, machineTokenSeed map[string]bool) []*nodeTemplateView {
+	var visit func(n database.ISecretNode, ancestorHas, ancestorMT bool) *nodeTemplateView
+	visit = func(n database.ISecretNode, ancestorHas, ancestorMT bool) *nodeTemplateView {
 		effective := ancestorHas || attached[n.ID()]
+		effectiveMT := ancestorMT || machineTokenSeed[n.ID()]
 		v := &nodeTemplateView{
-			ID:                   n.ID(),
-			Name:                 n.Name(),
-			HasEffectivePolicies: effective,
-			ParentID:             n.ParentID(),
+			ID:                       n.ID(),
+			Name:                     n.Name(),
+			HasEffectivePolicies:     effective,
+			HasEffectiveMachineToken: effectiveMT,
+			ParentID:                 n.ParentID(),
 		}
 		switch node := n.(type) {
 		case *database.Secret:
@@ -126,14 +133,14 @@ func buildTreeView(roots []database.ISecretNode, attached map[string]bool) []*no
 		case *database.SecretGroup:
 			v.Kind = "group"
 			for _, c := range node.Children() {
-				v.Children = append(v.Children, visit(c, effective))
+				v.Children = append(v.Children, visit(c, effective, effectiveMT))
 			}
 		}
 		return v
 	}
 	out := make([]*nodeTemplateView, 0, len(roots))
 	for _, r := range roots {
-		out = append(out, visit(r, false))
+		out = append(out, visit(r, false, false))
 	}
 	return out
 }
@@ -213,7 +220,13 @@ func (h *UIHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	views := buildTreeView(roots, attached)
+	mtSeed, err := h.db.MachineTokenSeedNodeIDs(ctx)
+	if err != nil {
+		slog.Error("collect machine token seed failed", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	views := buildTreeView(roots, attached, mtSeed)
 	groups, secrets := countNodeKinds(views)
 	unreachable := countUnreachableNodes(views)
 
@@ -271,7 +284,13 @@ func (h *UIHandler) browseTree(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	views := buildTreeView(roots, attached)
+	mtSeed, err := h.db.MachineTokenSeedNodeIDs(ctx)
+	if err != nil {
+		slog.Error("collect machine token seed failed", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	views := buildTreeView(roots, attached, mtSeed)
 	h.tmpl.Render(w, r, "secrets_browse.html", map[string]any{
 		"Roots": views,
 	})
@@ -309,17 +328,36 @@ func (h *UIHandler) viewNode(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	// Compute ancestor-has-policies by walking up from this node.
-	ancestorHas, err := h.anyAncestorHasPolicy(ctx, node.ParentID(), attached)
+	mtSeed, err := h.db.MachineTokenSeedNodeIDs(ctx)
+	if err != nil {
+		slog.Error("collect machine token seed failed", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	// Compute ancestor inheritance by walking up from this node — once for the
+	// policy-attached set and once for the machine-token seed, using the same
+	// walk so both flags inherit identically from ancestors above this subtree.
+	ancestorHas, err := h.anyAncestorInSeed(ctx, node.ParentID(), attached)
 	if err != nil {
 		slog.Error("ancestor walk failed", "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	views := buildTreeView(sub, attached)
+	ancestorMT, err := h.anyAncestorInSeed(ctx, node.ParentID(), mtSeed)
+	if err != nil {
+		slog.Error("ancestor walk failed", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	views := buildTreeView(sub, attached, mtSeed)
 	if ancestorHas {
 		for _, v := range views {
 			markEffective(v)
+		}
+	}
+	if ancestorMT {
+		for _, v := range views {
+			markEffectiveMachineToken(v)
 		}
 	}
 
@@ -361,9 +399,11 @@ func (h *UIHandler) viewNode(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// anyAncestorHasPolicy walks up the parent chain from parentID looking for
-// any ancestor with an attached policy.
-func (h *UIHandler) anyAncestorHasPolicy(ctx context.Context, parentID *string, attached map[string]bool) (bool, error) {
+// anyAncestorInSeed walks up the parent chain from parentID looking for any
+// ancestor present in the given seed set. Used for both the policy-attached set
+// and the machine-token seed set, so ancestor inheritance is computed
+// identically for both.
+func (h *UIHandler) anyAncestorInSeed(ctx context.Context, parentID *string, attached map[string]bool) (bool, error) {
 	for parentID != nil {
 		if attached[*parentID] {
 			return true, nil
@@ -388,6 +428,17 @@ func markEffective(v *nodeTemplateView) {
 	v.HasEffectivePolicies = true
 	for _, c := range v.Children {
 		markEffective(c)
+	}
+}
+
+// markEffectiveMachineToken sets HasEffectiveMachineToken on the given view and
+// all its descendants (used when an ancestor outside this subtree is granted by
+// a machine token). Mirrors markEffective so machine-token inheritance behaves
+// identically to policy inheritance.
+func markEffectiveMachineToken(v *nodeTemplateView) {
+	v.HasEffectiveMachineToken = true
+	for _, c := range v.Children {
+		markEffectiveMachineToken(c)
 	}
 }
 

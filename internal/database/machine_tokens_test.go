@@ -101,6 +101,48 @@ func TestMachineTokenSetUnknownNodeKeepsPrior(t *testing.T) {
 	assert.Equal(t, map[string]string{"S": "v"}, secrets, "a failed update leaves the prior attachments intact")
 }
 
+func TestMachineTokenSeedNodeIDs(t *testing.T) {
+	db := testDB(t)
+	ctx := context.Background()
+
+	// Direct-attach seed: a secret attached straight to a token.
+	direct, _ := db.CreateSecret(nil, "DIRECT", "v")
+	_, _, err := db.CreateMachineToken("direct", nil, []string{direct.ID()})
+	require.Nil(t, err)
+
+	// Policy-bound seed: a group with a policy attached, and a token bound to
+	// that policy. The seed is the group node (where the policy is attached),
+	// not the subtree leaves — the caller expands inheritance downward.
+	g, _ := db.CreateGroup(nil, "viapolicy")
+	gid := g.ID()
+	_, _ = db.CreateSecret(&gid, "CHILD", "v")
+	p, _ := db.CreatePolicy("p", []string{"*"}, []string{"*"}, []string{"*"})
+	require.Nil(t, db.AttachPolicy(gid, p.ID))
+	_, _, err = db.CreateMachineToken("bound", &p.ID, nil)
+	require.Nil(t, err)
+
+	// A secret reachable by neither a token nor a token-bound policy.
+	lonely, _ := db.CreateSecret(nil, "LONELY", "v")
+
+	seed, err := db.MachineTokenSeedNodeIDs(ctx)
+	require.Nil(t, err)
+	assert.True(t, seed[direct.ID()], "directly-attached node is in the seed")
+	assert.True(t, seed[gid], "policy-bound group node is in the seed")
+	assert.False(t, seed[lonely.ID()], "an unattached node is not in the seed")
+}
+
+func TestMachineTokenSeedNodeIDsEmpty(t *testing.T) {
+	db := testDB(t)
+	// A policy attached to a node but with NO token bound to it must not seed.
+	g, _ := db.CreateGroup(nil, "g")
+	p, _ := db.CreatePolicy("p", []string{"*"}, []string{"*"}, []string{"*"})
+	require.Nil(t, db.AttachPolicy(g.ID(), p.ID))
+
+	seed, err := db.MachineTokenSeedNodeIDs(context.Background())
+	require.Nil(t, err)
+	assert.Empty(t, seed, "a policy with no machine token bound contributes no seed")
+}
+
 func TestMachineTokenAttachmentCascadesOnSecretDelete(t *testing.T) {
 	db := testDB(t)
 	s, _ := db.CreateSecret(nil, "S", "v")
