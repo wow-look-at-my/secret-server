@@ -20,7 +20,10 @@
     </div>
 </div>
 
-{{if not .Node.HasEffectivePolicies}}
+{{if .Node.HasEffectiveMachineToken}}
+<div class="info">A machine token grants access to this {{.Node.Kind}}.</div>
+{{end}}
+{{if and (not .Node.HasEffectivePolicies) (not .Node.HasEffectiveMachineToken)}}
 <div class="error">This node has no effective policies (no policies attached here or on any ancestor). GitHub Actions will not see it until you attach a policy below.</div>
 {{end}}
 
