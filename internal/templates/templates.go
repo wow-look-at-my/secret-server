@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	gorillacsrf "github.com/gorilla/csrf"
 )
@@ -46,12 +47,37 @@ func New(adminPrefix, version string) (*Templates, error) {
 				return fmt.Sprintf("%v", val)
 			}
 		},
+		"timeTag": timeTag,
 	}
 	tmpl, err := template.New("").Funcs(funcs).ParseFS(templateFS, "*.html")
 	if err != nil {
 		return nil, err
 	}
 	return &Templates{tmpl: tmpl}, nil
+}
+
+// timeTag renders a timestamp as a <time> element carrying the RFC3339 UTC
+// instant in its datetime attribute, with a plain UTC string as the no-JS
+// fallback text. The inline localizer script in layout.html's "foot" block
+// rewrites it into the viewer's own locale/time zone. The markup is built
+// solely from time.Format output, which contains no HTML metacharacters, so
+// returning template.HTML is safe here.
+func timeTag(v any) template.HTML {
+	var t time.Time
+	switch val := v.(type) {
+	case time.Time:
+		t = val
+	case *time.Time:
+		if val == nil {
+			return template.HTML("")
+		}
+		t = *val
+	default:
+		return template.HTML("")
+	}
+	u := t.UTC()
+	return template.HTML(fmt.Sprintf(`<time datetime="%s">%s UTC</time>`,
+		u.Format(time.RFC3339), u.Format("2006-01-02 15:04:05")))
 }
 
 func (t *Templates) ServeCSS(w http.ResponseWriter, r *http.Request) {

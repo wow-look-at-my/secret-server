@@ -10,7 +10,7 @@ Self-hosted secrets manager for homelab use. Single Go binary with SQLite storag
 | Admin API | `/admin/v1/*` | Cloudflare Access JWT | Manage the secret tree, policies, attachments, and machine tokens |
 | Admin UI | `/admin/*` | Cloudflare Access JWT | Web UI for the secret tree, policies, attachments, and machine tokens |
 
-Two path prefixes for Cloudflare Access: protect `/admin/*`, bypass `/github/*`. The GitHub API validates OIDC tokens directly. Admin routes are protected by Cloudflare Access (the server validates CF JWTs as defense-in-depth). The root path `/` redirects to the admin UI. `GET /health` is available for Docker/uptime checks (not routed through CF Access).
+Two path prefixes for Cloudflare Access: protect `/admin/*`, bypass `/github/*`. The GitHub API validates OIDC tokens directly. Admin routes are protected by Cloudflare Access (the server validates CF JWTs as defense-in-depth). The root path `/` redirects to the admin UI. `GET /health` is available for Docker/uptime checks (not routed through CF Access). `GET /llms.txt` serves a plain-text guide to the server for LLMs/agents ([llms.txt](https://llmstxt.org) convention) — public, but the Cloudflare Access application needs a path bypass for `/llms.txt` (like `/github/*`) for it to be reachable.
 
 ## Configuration
 
@@ -136,7 +136,7 @@ curl -fsSL -H "Authorization: Bearer $SECRET_SERVER_TOKEN" \
 
 1. Create a self-hosted application in Cloudflare Access
 2. Set the application URL to cover `/admin/*` (covers both the API and web UI)
-3. Add a bypass rule for `/github/*` (covers the OIDC API and health check)
+3. Add bypass rules for `/github/*` (the OIDC API), `/health`, and `/llms.txt`
 4. Configure the `CF_ACCESS_TEAM_DOMAIN` and `CF_ACCESS_ADMIN_AUDIENCE` env vars
 
 ## Dependencies
