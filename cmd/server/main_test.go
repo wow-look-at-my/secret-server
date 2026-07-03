@@ -67,6 +67,27 @@ func TestHealthEndpoint(t *testing.T) {
 	assert.Equal(t, "ok", rr.Body.String())
 }
 
+func TestLlmsTxtEndpoint(t *testing.T) {
+	db, auditDB := testDB(t)
+	cfg := &config.Config{
+		CFAccessTeamDomain:    "team",
+		CFAccessAdminAudience: "aud",
+	}
+	mux, err := buildMux(db, auditDB, cfg)
+	require.Nil(t, err)
+
+	// Public like /health: served directly, no CF Access, no redirect.
+	req := httptest.NewRequest("GET", "/llms.txt", nil)
+	req.Host = "secrets.pazer.io"
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Equal(t, "text/plain; charset=utf-8", rr.Header().Get("Content-Type"))
+	assert.Contains(t, rr.Body.String(), "https://secrets.pazer.io/github/v1/secrets")
+	assert.NotContains(t, rr.Body.String(), "{{BASE_URL}}")
+}
+
 func TestRootRedirect(t *testing.T) {
 	db, auditDB := testDB(t)
 	cfg := &config.Config{

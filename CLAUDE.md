@@ -17,6 +17,7 @@ Two path prefixes for Cloudflare Access:
 - `/admin/*` — protected (API + web UI)
 - `/github/*` — bypassed (GitHub Actions OIDC)
 - `/health` — not routed through CF Access (Docker/uptime checks)
+- `/llms.txt` — public plain-text guide for LLMs/agents (llmstxt.org convention; `internal/handlers/llms.go`, embedded `llms.txt` with per-request `{{BASE_URL}}` substitution). CF Access needs a path bypass for `/llms.txt` (like `/github/*`) for it to be publicly reachable.
 
 Route constants are in `internal/handlers/routes.go`. Templates use `{{prefix}}` to
 reference the admin UI prefix.
