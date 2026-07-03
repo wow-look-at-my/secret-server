@@ -19,7 +19,7 @@
     <tbody>
         {{range .Entries}}
         <tr>
-            <td>{{.Timestamp.Format "2006-01-02 15:04:05"}}</td>
+            <td>{{timeTag .Timestamp}}</td>
             <td><code>{{.Action}}</code></td>
             <td>
                 {{.ActorDisplay}}
