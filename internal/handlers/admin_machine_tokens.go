@@ -168,6 +168,31 @@ func (h *AdminHandler) updateMachineToken(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// regenerateMachineToken mints a fresh token value for an existing token,
+// keeping its name, bound policy, and node attachments. The old value stops
+// working immediately.
+func (h *AdminHandler) regenerateMachineToken(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	token, err := h.db.RegenerateMachineToken(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			http.Error(w, `{"error":"machine token not found"}`, http.StatusNotFound)
+			return
+		}
+		slog.Error("regenerate machine token failed", "error", err)
+		http.Error(w, `{"error":"failed to regenerate machine token"}`, http.StatusInternalServerError)
+		return
+	}
+
+	if err := h.audit.CreateEntry("machine_token.regenerate", "admin", adminActor(r), "machine_token", id, "{}"); err != nil {
+		slog.Error("audit log failed", "error", err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	// The plaintext token is returned exactly once — only its hash is stored.
+	json.NewEncoder(w).Encode(map[string]string{"id": id, "token": token})
+}
+
 func (h *AdminHandler) deleteMachineToken(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := h.db.DeleteMachineToken(id); err != nil {

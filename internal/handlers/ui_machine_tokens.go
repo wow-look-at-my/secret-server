@@ -253,6 +253,41 @@ func (h *UIHandler) updateMachineTokenForm(w http.ResponseWriter, r *http.Reques
 	http.Redirect(w, r, AdminPrefix+"/machine-tokens", http.StatusSeeOther)
 }
 
+func (h *UIHandler) regenerateMachineTokenForm(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	tok, err := h.db.GetMachineToken(id)
+	if err != nil {
+		slog.Error("get machine token failed", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	if tok == nil {
+		http.NotFound(w, r)
+		return
+	}
+	token, err := h.db.RegenerateMachineToken(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		slog.Error("regenerate machine token failed", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	if err := h.audit.CreateEntry("machine_token.regenerate", "admin", uiActor(r), "machine_token", id, "{}"); err != nil {
+		slog.Error("audit log failed", "error", err)
+	}
+
+	// Show the new token exactly once — the old value stopped working the
+	// moment it was replaced.
+	h.tmpl.Render(w, r, "machine_token_created.html", map[string]any{
+		"Token":       token,
+		"Name":        tok.Name,
+		"Regenerated": true,
+	})
+}
+
 func (h *UIHandler) deleteMachineTokenForm(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := h.db.DeleteMachineToken(id); err != nil {

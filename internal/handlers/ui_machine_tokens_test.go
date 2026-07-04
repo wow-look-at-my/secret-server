@@ -170,6 +170,56 @@ func TestUIDeleteNonexistentMachineToken(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, rr.Code)
 }
 
+func TestUIMachineTokenRegenerate(t *testing.T) {
+	env := setup(t)
+	s, _ := env.db.CreateSecret(nil, "S", "v")
+	oldToken, rec, err := env.db.CreateMachineToken("rotate-me", nil, []string{s.ID()})
+	require.Nil(t, err)
+
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	req := httptest.NewRequest("POST", "/admin/machine-tokens/"+rec.ID+"/regenerate", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	// Success renders the show-once page with the new token and the name.
+	require.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Body.String(), "sst_")
+	assert.Contains(t, rr.Body.String(), "rotate-me")
+	assert.Contains(t, rr.Body.String(), "Regenerated")
+	assert.NotContains(t, rr.Body.String(), oldToken, "the page shows the new token, never the old one")
+
+	// The old token stopped working the moment it was replaced.
+	got, err := env.db.LookupMachineToken(oldToken)
+	require.Nil(t, err)
+	assert.Nil(t, got)
+}
+
+func TestUIRegenerateNonexistentMachineToken(t *testing.T) {
+	env := setup(t)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	req := httptest.NewRequest("POST", "/admin/machine-tokens/00000000-0000-0000-0000-000000000000/regenerate", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+func TestUIRegenerateMachineTokenDBError(t *testing.T) {
+	env := setupClosedMainDB(t)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	req := httptest.NewRequest("POST", "/admin/machine-tokens/00000000-0000-0000-0000-000000000000/regenerate", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+}
+
 func TestUIListMachineTokensDBError(t *testing.T) {
 	env := setupClosedMainDB(t)
 	h := NewUIHandler(env.db, env.audit, env.tmpl)
