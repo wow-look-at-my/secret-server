@@ -75,6 +75,7 @@ func (h *AdminHandler) Register(r chi.Router) {
 	r.Post(p+"/machine-tokens", h.createMachineToken)
 	r.Put(p+"/machine-tokens/{id}", h.updateMachineToken)
 	r.Delete(p+"/machine-tokens/{id}", h.deleteMachineToken)
+	r.Post(p+"/machine-tokens/{id}/regenerate", h.regenerateMachineToken)
 }
 
 func adminActor(r *http.Request) string {

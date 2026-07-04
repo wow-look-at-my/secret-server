@@ -300,6 +300,57 @@ func TestUpdateMachineTokenPolicyAndNodes(t *testing.T) {
 	assert.Equal(t, map[string]string{"B": "2"}, secrets)
 }
 
+func TestRegenerateMachineToken(t *testing.T) {
+	db := testDB(t)
+	p, err := db.CreatePolicy("pol", nil, nil, nil)
+	require.Nil(t, err)
+	s, _ := db.CreateSecret(nil, "S", "v")
+	oldToken, rec, err := db.CreateMachineToken("rotate-me", &p.ID, []string{s.ID()})
+	require.Nil(t, err)
+
+	newToken, err := db.RegenerateMachineToken(context.Background(), rec.ID)
+	require.Nil(t, err)
+	assert.True(t, strings.HasPrefix(newToken, MachineTokenPrefix), "regenerated token carries the sst_ prefix")
+	assert.NotEqual(t, oldToken, newToken, "regeneration mints a distinct value")
+
+	// The new token resolves to the same record; the old one is dead.
+	got, err := db.LookupMachineToken(newToken)
+	require.Nil(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, rec.ID, got.ID)
+	assert.True(t, strings.HasPrefix(newToken, got.TokenPrefix), "the display prefix tracks the new value")
+	old, err := db.LookupMachineToken(oldToken)
+	require.Nil(t, err)
+	assert.Nil(t, old, "the old token no longer resolves")
+
+	// Name, bound policy, and node attachments are untouched.
+	assert.Equal(t, "rotate-me", got.Name)
+	require.NotNil(t, got.PolicyID)
+	assert.Equal(t, p.ID, *got.PolicyID)
+	nodes, err := db.ListTokenNodes(rec.ID)
+	require.Nil(t, err)
+	require.Equal(t, 1, len(nodes))
+	assert.Equal(t, "S", nodes[0].Name)
+}
+
+func TestRegenerateMachineTokenUnknownID(t *testing.T) {
+	db := testDB(t)
+	_, err := db.RegenerateMachineToken(context.Background(), uuid.NewString())
+	assert.ErrorIs(t, err, ErrNotFound)
+}
+
+func TestRegenerateMachineTokenDBError(t *testing.T) {
+	db := testDB(t)
+	s, _ := db.CreateSecret(nil, "S", "v")
+	_, rec, err := db.CreateMachineToken("t", nil, []string{s.ID()})
+	require.Nil(t, err)
+
+	db.Close()
+	_, err = db.RegenerateMachineToken(context.Background(), rec.ID)
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrNotFound, "a query failure is not reported as a missing token")
+}
+
 func TestUpdateMachineTokenUnknownPolicyKeepsPrior(t *testing.T) {
 	db := testDB(t)
 	a, _ := db.CreateSecret(nil, "A", "1")

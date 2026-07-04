@@ -144,6 +144,93 @@ func TestAdminMachineTokenLifecycle(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, rr.Code)
 }
 
+func TestAdminRegenerateMachineToken(t *testing.T) {
+	env := setup(t)
+	h := NewAdminHandler(env.db, env.audit)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	nodeID := createSecret(t, env, "X", "y")
+	req := jsonReq("POST", "/admin/v1/machine-tokens", `{"name":"reconcile","node_ids":["`+nodeID+`"]}`)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusCreated, rr.Code)
+	var created map[string]string
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &created))
+	id := created["id"]
+	oldToken := created["token"]
+
+	ph := NewPublicHandler(env.db, env.audit, env.oidc)
+	pmux := chi.NewRouter()
+	ph.Register(pmux)
+	vend := func(token string) *httptest.ResponseRecorder {
+		preq := httptest.NewRequest("GET", "/github/v1/secrets", nil)
+		preq.Header.Set("Authorization", "Bearer "+token)
+		prr := httptest.NewRecorder()
+		pmux.ServeHTTP(prr, preq)
+		return prr
+	}
+
+	// The original token vends before regeneration.
+	require.Equal(t, http.StatusOK, vend(oldToken).Code)
+
+	// Regenerate: 200 with the same id and a fresh token.
+	req = httptest.NewRequest("POST", "/admin/v1/machine-tokens/"+id+"/regenerate", nil)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code)
+	var regen map[string]string
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &regen))
+	assert.Equal(t, id, regen["id"])
+	newToken := regen["token"]
+	assert.True(t, strings.HasPrefix(newToken, "sst_"), "regenerated token should carry the sst_ prefix")
+	assert.NotEqual(t, oldToken, newToken)
+
+	// The old token is dead; the new one vends the same secret.
+	assert.Equal(t, http.StatusUnauthorized, vend(oldToken).Code)
+	prr := vend(newToken)
+	require.Equal(t, http.StatusOK, prr.Code)
+	var vended map[string]string
+	require.NoError(t, json.Unmarshal(prr.Body.Bytes(), &vended))
+	assert.Equal(t, "y", vended["X"])
+
+	// The regeneration is audited.
+	entries, err := env.audit.ListEntries(20, 0)
+	require.Nil(t, err)
+	found := false
+	for _, e := range entries {
+		if e.Action == "machine_token.regenerate" {
+			found = true
+			assert.Equal(t, id, e.ResourceID)
+		}
+	}
+	assert.True(t, found, "a machine_token.regenerate audit entry is recorded")
+}
+
+func TestAdminRegenerateMachineTokenNotFound(t *testing.T) {
+	env := setup(t)
+	h := NewAdminHandler(env.db, env.audit)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	req := httptest.NewRequest("POST", "/admin/v1/machine-tokens/00000000-0000-0000-0000-000000000000/regenerate", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+func TestAdminRegenerateMachineTokenDBError(t *testing.T) {
+	env := setupClosedMainDB(t)
+	h := NewAdminHandler(env.db, env.audit)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	req := httptest.NewRequest("POST", "/admin/v1/machine-tokens/00000000-0000-0000-0000-000000000000/regenerate", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+}
+
 func TestAdminUpdateMachineTokenNodes(t *testing.T) {
 	env := setup(t)
 	h := NewAdminHandler(env.db, env.audit)
