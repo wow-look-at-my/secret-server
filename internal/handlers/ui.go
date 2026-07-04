@@ -67,6 +67,7 @@ func (h *UIHandler) Register(r chi.Router) {
 	r.Get(p+"/machine-tokens/{id}/edit", h.editMachineToken)
 	r.Post(p+"/machine-tokens/{id}", h.updateMachineTokenForm)
 	r.Post(p+"/machine-tokens/{id}/delete", h.deleteMachineTokenForm)
+	r.Post(p+"/machine-tokens/{id}/regenerate", h.regenerateMachineTokenForm)
 
 	r.Get(p+"/audit", h.auditLog)
 	r.Get(p+"/style.css", h.tmpl.ServeCSS)

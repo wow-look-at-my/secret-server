@@ -23,6 +23,9 @@ ORDER BY t.created_at DESC;
 -- name: SetMachineTokenPolicy :exec
 UPDATE machine_tokens SET policy_id = ? WHERE id = ?;
 
+-- name: UpdateMachineTokenCredentials :execresult
+UPDATE machine_tokens SET token_hash = ?, token_prefix = ? WHERE id = ?;
+
 -- name: DeleteMachineToken :execresult
 DELETE FROM machine_tokens WHERE id = ?;
 
