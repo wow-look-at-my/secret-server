@@ -173,6 +173,35 @@ func (d *DB) UpdateMachineToken(id string, policyID *string, nodeIDs []string) e
 	return tx.Commit()
 }
 
+// RegenerateMachineToken mints a fresh token value for an existing token,
+// replacing the stored hash and display prefix in place. The token's name,
+// bound policy, and node attachments are untouched — only the credential
+// changes, so the old plaintext stops working the moment this returns. Like
+// creation, the returned plaintext is the only time the new value is ever
+// available. An unknown id returns ErrNotFound.
+func (d *DB) RegenerateMachineToken(ctx context.Context, id string) (string, error) {
+	token, hash, prefix, err := generateMachineToken()
+	if err != nil {
+		return "", err
+	}
+	result, err := d.q.UpdateMachineTokenCredentials(ctx, sqlcdb.UpdateMachineTokenCredentialsParams{
+		TokenHash:   hash,
+		TokenPrefix: prefix,
+		ID:          id,
+	})
+	if err != nil {
+		return "", fmt.Errorf("update machine token credentials: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return "", err
+	}
+	if n == 0 {
+		return "", ErrNotFound
+	}
+	return token, nil
+}
+
 // ensurePolicyExists returns ErrNotFound if a non-empty policy id is given but
 // no such policy exists. A nil/"" id (no policy) always passes.
 func (d *DB) ensurePolicyExists(policyID *string) error {

@@ -293,3 +293,17 @@ func (q *Queries) TouchMachineToken(ctx context.Context, arg TouchMachineTokenPa
 	_, err := q.db.ExecContext(ctx, touchMachineToken, arg.LastUsedAt, arg.ID)
 	return err
 }
+
+const updateMachineTokenCredentials = `-- name: UpdateMachineTokenCredentials :execresult
+UPDATE machine_tokens SET token_hash = ?, token_prefix = ? WHERE id = ?
+`
+
+type UpdateMachineTokenCredentialsParams struct {
+	TokenHash   string
+	TokenPrefix string
+	ID          string
+}
+
+func (q *Queries) UpdateMachineTokenCredentials(ctx context.Context, arg UpdateMachineTokenCredentialsParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, updateMachineTokenCredentials, arg.TokenHash, arg.TokenPrefix, arg.ID)
+}
