@@ -1,0 +1,53 @@
+{{template "head" .}}
+{{define "title"}}Machine Tokens - Secret Server{{end}}
+
+<div class="toolbar">
+    <h1>Machine Tokens</h1>
+    <a href="{{prefix}}/machine-tokens/new" class="btn btn-primary">New Machine Token</a>
+</div>
+<p class="page-desc">Bearer credentials for clients that can't present a GitHub Actions OIDC token (e.g. webhook-runner hooks). Each token attaches directly to secrets and vends them via <code>GET /github/v1/secrets</code> &mdash; no policy. Only the hash is stored; the value is shown once, when created or regenerated.</p>
+
+{{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+
+{{if .Tokens}}
+<table>
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Token</th>
+            <th>Secrets</th>
+            <th>Policy</th>
+            <th>Created</th>
+            <th>Last Used</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{range .Tokens}}
+        <tr>
+            <td>{{.Name}}</td>
+            <td><code>{{.TokenPrefix}}…</code></td>
+            <td>{{range .Nodes}}<span class="chip kind-{{.Kind}}" title="{{.Kind}}">{{.Name}}</span> {{else}}<span class="empty">none</span>{{end}}</td>
+            <td>{{if .PolicyName}}{{.PolicyName}}{{else}}<span class="empty">—</span>{{end}}</td>
+            <td>{{timeTag .CreatedAt}}</td>
+            <td>{{if .LastUsedAt}}{{timeTag .LastUsedAt}}{{else}}<span class="empty">never</span>{{end}}</td>
+            <td>
+                <a href="{{prefix}}/machine-tokens/{{.ID}}/edit" class="btn btn-sm">Edit</a>
+                <form class="inline" method="post" action="{{prefix}}/machine-tokens/{{.ID}}/regenerate" onsubmit="return confirm('Regenerate this machine token? The current token value stops working immediately; you will be shown a new one to give to clients.')">
+                    {{with csrfToken}}<input type="hidden" name="csrf_token" value="{{.}}">{{end}}
+                    <button type="submit" class="btn btn-sm">Regenerate</button>
+                </form>
+                <form class="inline" method="post" action="{{prefix}}/machine-tokens/{{.ID}}/delete" onsubmit="return confirm('Revoke this machine token? Any client using it will immediately lose access.')">
+                    {{with csrfToken}}<input type="hidden" name="csrf_token" value="{{.}}">{{end}}
+                    <button type="submit" class="btn btn-sm btn-danger">Revoke</button>
+                </form>
+            </td>
+        </tr>
+        {{end}}
+    </tbody>
+</table>
+{{else}}
+<p class="empty">No machine tokens yet. <a href="{{prefix}}/machine-tokens/new">Create one</a> to let a non-Actions client fetch secrets.</p>
+{{end}}
+
+{{template "foot" .}}

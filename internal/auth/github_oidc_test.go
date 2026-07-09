@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/go-jose/go-jose/v4"
-	"github.com/wow-look-at-my/testify/assert"
-	"github.com/wow-look-at-my/testify/require"
 	"github.com/go-jose/go-jose/v4/jwt"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestValidateTokenValid(t *testing.T) {
@@ -25,12 +25,12 @@ func TestValidateTokenValid(t *testing.T) {
 	require.Nil(t, err)
 
 	stdClaims := jwt.Claims{
-		Issuer:		"https://token.actions.githubusercontent.com",
-		Subject:	"repo:myorg/myrepo:ref:refs/heads/main",
-		Audience:	jwt.Audience{"https://secrets.example.com"},
-		Expiry:		jwt.NewNumericDate(time.Now().Add(time.Hour)),
-		NotBefore:	jwt.NewNumericDate(time.Now().Add(-time.Minute)),
-		IssuedAt:	jwt.NewNumericDate(time.Now()),
+		Issuer:    "https://token.actions.githubusercontent.com",
+		Subject:   "repo:myorg/myrepo:ref:refs/heads/main",
+		Audience:  jwt.Audience{"https://secrets.example.com"},
+		Expiry:    jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		NotBefore: jwt.NewNumericDate(time.Now().Add(-time.Minute)),
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
 	}
 	customClaims := struct {
 		Repository      string `json:"repository"`
@@ -74,9 +74,9 @@ func TestValidateTokenExpired(t *testing.T) {
 
 	signer, _ := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: jwk}, (&jose.SignerOptions{}).WithType("JWT"))
 	stdClaims := jwt.Claims{
-		Issuer:		"https://token.actions.githubusercontent.com",
-		Audience:	jwt.Audience{"aud"},
-		Expiry:		jwt.NewNumericDate(time.Now().Add(-time.Hour)),
+		Issuer:   "https://token.actions.githubusercontent.com",
+		Audience: jwt.Audience{"aud"},
+		Expiry:   jwt.NewNumericDate(time.Now().Add(-time.Hour)),
 	}
 	token, _ := jwt.Signed(signer).Claims(stdClaims).Serialize()
 
@@ -97,10 +97,10 @@ func TestValidateTokenWrongIssuer(t *testing.T) {
 
 	signer, _ := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: jwk}, (&jose.SignerOptions{}).WithType("JWT"))
 	stdClaims := jwt.Claims{
-		Issuer:		"https://evil.example.com",
-		Audience:	jwt.Audience{"aud"},
-		Expiry:		jwt.NewNumericDate(time.Now().Add(time.Hour)),
-		NotBefore:	jwt.NewNumericDate(time.Now().Add(-time.Minute)),
+		Issuer:    "https://evil.example.com",
+		Audience:  jwt.Audience{"aud"},
+		Expiry:    jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		NotBefore: jwt.NewNumericDate(time.Now().Add(-time.Minute)),
 	}
 	token, _ := jwt.Signed(signer).Claims(stdClaims).Serialize()
 
@@ -123,9 +123,9 @@ func TestValidateTokenNoMatchingKey(t *testing.T) {
 
 	signer, _ := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: jwk}, (&jose.SignerOptions{}).WithType("JWT"))
 	token, _ := jwt.Signed(signer).Claims(jwt.Claims{
-		Issuer:		"https://token.actions.githubusercontent.com",
-		Audience:	jwt.Audience{"aud"},
-		Expiry:		jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		Issuer:   "https://token.actions.githubusercontent.com",
+		Audience: jwt.Audience{"aud"},
+		Expiry:   jwt.NewNumericDate(time.Now().Add(time.Hour)),
 	}).Serialize()
 
 	v := NewGitHubOIDCValidator("aud")
