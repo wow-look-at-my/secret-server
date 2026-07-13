@@ -5,17 +5,14 @@
 package sqlcdb
 
 import (
+	"database/sql"
 	"time"
 )
 
 type AccessPolicy struct {
-	ID                 string
-	Name               string
-	RepositoryPatterns string
-	RefPatterns        string
-	ActorPatterns      string
-	EnvironmentID      string
-	CreatedAt          time.Time
+	ID        string
+	Name      string
+	CreatedAt time.Time
 }
 
 type AuditLog struct {
@@ -29,18 +26,44 @@ type AuditLog struct {
 	Details      string
 }
 
-type Environment struct {
+type MachineToken struct {
 	ID          string
-	Project     string
-	Environment string
+	Name        string
+	TokenHash   string
+	TokenPrefix string
+	PolicyID    sql.NullString
 	CreatedAt   time.Time
+	LastUsedAt  sql.NullTime
 }
 
-type Secret struct {
-	ID            string
-	Key           string
-	Value         []byte
-	EnvironmentID string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+type MachineTokenNode struct {
+	TokenID string
+	NodeID  string
+}
+
+type PolicyPattern struct {
+	PolicyID string
+	Kind     string
+	Pattern  string
+}
+
+type PolicyPrecedence struct {
+	NodeID      string
+	PolicyID    string
+	DependsOnID string
+}
+
+type SecretNode struct {
+	ID        string
+	Kind      string
+	ParentID  sql.NullString
+	Name      string
+	Value     []byte
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+type SecretNodePolicy struct {
+	NodeID   string
+	PolicyID string
 }

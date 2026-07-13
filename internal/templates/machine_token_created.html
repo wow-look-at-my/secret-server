@@ -1,0 +1,35 @@
+{{template "head" .}}
+{{define "title"}}Machine Token {{if .Regenerated}}Regenerated{{else}}Created{{end}} - Secret Server{{end}}
+
+<h1>Machine Token {{if .Regenerated}}Regenerated{{else}}Created{{end}}</h1>
+
+<div class="error">Copy this token now — it is shown only once and cannot be recovered. If you lose it, regenerate the token for a fresh value.{{if .Regenerated}} The previous value has stopped working — update every client that used it.{{end}}</div>
+
+<p class="page-desc">Token <strong>{{.Name}}</strong>. Give it to the client as a Bearer credential against <code>GET /github/v1/secrets</code>; it vends exactly the secrets you attached.</p>
+
+<div class="form-group">
+    <label for="token">Token</label>
+    <div class="input-wrap">
+        <input type="text" id="token" class="secret-value" value="{{.Token}}" readonly onclick="this.select()">
+        <button type="button" class="btn btn-sm btn-copy" onclick="copyToken()">Copy</button>
+    </div>
+    <div class="hint">For a webhook-runner hook, set this as <code>SECRET_SERVER_TOKEN</code> in the hook's <code>hook.json</code> <code>env</code>.</div>
+</div>
+
+<div class="actions">
+    <a href="{{prefix}}/machine-tokens" class="btn btn-primary">Done</a>
+</div>
+
+<script>
+function copyToken() {
+    var el = document.getElementById('token');
+    el.select();
+    navigator.clipboard.writeText(el.value).then(function () {
+        var btn = el.parentElement.querySelector('button');
+        btn.textContent = 'Copied';
+        btn.classList.add('copied');
+    });
+}
+</script>
+
+{{template "foot" .}}

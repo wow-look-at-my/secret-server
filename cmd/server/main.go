@@ -135,6 +135,9 @@ func buildMux(db *database.DB, auditDB *database.AuditDB, cfg *config.Config) (c
 		w.Write([]byte("ok"))
 	})
 
+	// Public llms.txt guide for LLMs/agents — like /health, not behind CF Access
+	handlers.RegisterLlms(r)
+
 	// Admin API — behind CF Access (no CSRF — JSON API)
 	adminHandler := handlers.NewAdminHandler(db, auditDB)
 	r.Group(func(r chi.Router) {

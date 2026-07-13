@@ -1,0 +1,17 @@
+{{define "nodeTree"}}
+<ul class="node-tree">
+    {{range .}}
+    <li class="node-tree-item node-kind-{{.Kind}}{{if not .HasEffectivePolicies}} node-unreachable{{end}}">
+        <span class="node-row">
+            {{if eq .Kind "group"}}<span class="node-icon" aria-hidden="true">[+]</span>{{else}}<span class="node-icon" aria-hidden="true">[-]</span>{{end}}
+            <a href="{{prefix}}/secrets/{{.ID}}">{{.Name}}</a>
+            {{if .HasEffectiveMachineToken}}<span class="node-machine-token" title="A machine token grants access to this secret">machine token</span>{{end}}
+            {{if and (not .HasEffectivePolicies) (not .HasEffectiveMachineToken)}}<span class="node-warning" title="No policies attached at this node or any ancestor">no policies</span>{{end}}
+        </span>
+        {{if .Children}}
+        {{template "nodeTree" .Children}}
+        {{end}}
+    </li>
+    {{end}}
+</ul>
+{{end}}
