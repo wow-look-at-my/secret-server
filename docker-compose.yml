@@ -8,6 +8,7 @@ services:
     environment:
       - LISTEN_ADDR=:8080
       - DATABASE_PATH=/data/secrets.db
+      - AUDIT_DATABASE_PATH=/data/audit.db
       - ENCRYPTION_KEY=${ENCRYPTION_KEY}
       - CF_ACCESS_TEAM_DOMAIN=${CF_ACCESS_TEAM_DOMAIN}
       - CF_ACCESS_ADMIN_AUDIENCE=${CF_ACCESS_ADMIN_AUDIENCE}
@@ -17,6 +18,7 @@ services:
       - docker-updater.enable=true
     networks:
       - nas-public-network
+
 
 networks:
   nas-public-network:

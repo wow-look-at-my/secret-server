@@ -21,6 +21,7 @@ type GitHubClaims struct {
 	Subject         string `json:"-"` // populated from jwt.Claims.Subject
 	Repository      string `json:"repository"`
 	RepositoryOwner string `json:"repository_owner"`
+	Actor           string `json:"actor"`
 	Workflow        string `json:"workflow"`
 	Ref             string `json:"ref"`
 	Environment     string `json:"environment"`
@@ -76,8 +77,8 @@ func (v *GitHubOIDCValidator) ValidateToken(ctx context.Context, tokenString str
 	}
 
 	expected := jwt.Expected{
-		Issuer:   "https://token.actions.githubusercontent.com",
-		Time:     time.Now(),
+		Issuer: "https://token.actions.githubusercontent.com",
+		Time:   time.Now(),
 	}
 	if v.audience != "" {
 		expected.AnyAudience = []string{v.audience}

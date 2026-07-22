@@ -6,39 +6,34 @@
 {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
 
 <form method="post" action="{{if .IsNew}}{{prefix}}/policies{{else}}{{prefix}}/policies/{{.Policy.ID}}{{end}}">
+    {{with csrfToken}}<input type="hidden" name="csrf_token" value="{{.}}">{{end}}
     <div class="form-group">
         <label for="name">Name</label>
         <input type="text" id="name" name="name" required
             value="{{if .IsNew}}{{else}}{{.Policy.Name}}{{end}}"
             placeholder="e.g. Allow myapp prod deploys">
+        <div class="hint">A human-readable label for this policy.</div>
     </div>
 
     <div class="form-group">
-        <label for="repository_pattern">Repository Pattern</label>
-        <input type="text" id="repository_pattern" name="repository_pattern" required
-            value="{{if .IsNew}}{{else}}{{.Policy.RepositoryPattern}}{{end}}"
-            placeholder="e.g. wow-look-at-my/* or owner/repo">
+        <label for="repository_patterns">Repository Patterns</label>
+        <textarea id="repository_patterns" name="repository_patterns" rows="3"
+            placeholder="wow-look-at-my/*&#10;owner/repo">{{if not .IsNew}}{{joinLines .Policy.RepositoryPatterns}}{{end}}</textarea>
+        <div class="hint">One SQLite GLOB pattern per line. A request is allowed if the repository matches any of these. Leave blank to create the policy with no repository patterns &mdash; an empty policy matches nothing (grants no access) until you add patterns, so it is safe to fill in later.</div>
     </div>
 
     <div class="form-group">
-        <label for="ref_pattern">Ref Pattern</label>
-        <input type="text" id="ref_pattern" name="ref_pattern"
-            value="{{if .IsNew}}*{{else}}{{.Policy.RefPattern}}{{end}}"
-            placeholder="e.g. refs/heads/main or *">
+        <label for="ref_patterns">Ref Patterns</label>
+        <textarea id="ref_patterns" name="ref_patterns" rows="3"
+            placeholder="refs/heads/main&#10;refs/tags/v*">{{if not .IsNew}}{{joinLines .Policy.RefPatterns}}{{end}}</textarea>
+        <div class="hint">One SQLite GLOB per line. Git ref filter (e.g. <code>refs/heads/main</code>). Leave blank to match nothing (no implicit wildcard) &mdash; write <code>*</code> explicitly to match any ref.</div>
     </div>
 
     <div class="form-group">
-        <label for="project">Project</label>
-        <input type="text" id="project" name="project" required
-            value="{{if .IsNew}}{{else}}{{.Policy.Project}}{{end}}"
-            placeholder="e.g. myapp">
-    </div>
-
-    <div class="form-group">
-        <label for="environment">Environment</label>
-        <input type="text" id="environment" name="environment" required
-            value="{{if .IsNew}}{{else}}{{.Policy.Environment}}{{end}}"
-            placeholder="e.g. prod">
+        <label for="actor_patterns">Actor Patterns</label>
+        <textarea id="actor_patterns" name="actor_patterns" rows="3"
+            placeholder="octocat&#10;my-team-*">{{if not .IsNew}}{{joinLines .Policy.ActorPatterns}}{{end}}</textarea>
+        <div class="hint">One SQLite GLOB per line. GitHub username filter. Leave blank to match nothing (no implicit wildcard) &mdash; write <code>*</code> explicitly to match any actor.</div>
     </div>
 
     <div class="actions">
@@ -46,5 +41,7 @@
         <a href="{{prefix}}/policies" class="btn">Cancel</a>
     </div>
 </form>
+
+<p class="page-desc">After creating the policy, attach it to one or more nodes in the <a href="{{prefix}}/secrets">secret tree</a> to grant access to those nodes.</p>
 
 {{template "foot" .}}

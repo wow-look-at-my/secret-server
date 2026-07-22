@@ -1,0 +1,115 @@
+{{template "head" .}}
+{{define "title"}}Audit Log - Secret Server{{end}}
+
+<h1>Audit Log</h1>
+<p class="page-desc">Record of all secret and policy changes. Shows who did what and when.</p>
+
+{{if .Entries}}
+<table>
+    <thead>
+        <tr>
+            <th>Time</th>
+            <th>Action</th>
+            <th>Actor</th>
+            <th>Resource</th>
+            <th>Details</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {{range .Entries}}
+        <tr>
+            <td>{{timeTag .Timestamp}}</td>
+            <td><code>{{.Action}}</code></td>
+            <td>
+                {{.ActorDisplay}}
+                {{if .ActorSubtext}}<br><span class="actor-subtext">{{.ActorSubtext}}</span>{{end}}
+            </td>
+            <td>{{.ResourceType}}{{if .ResourceID}} {{.ResourceID}}{{end}}</td>
+            <td>
+                {{if .DetailsMap}}
+                    <span class="audit-summary">{{.DetailsSummary}}</span>
+                    {{if .DetailsMap}}
+                    <details class="json-details">
+                        <summary>details</summary>
+                        <dl class="detail-list">
+                            {{range $k, $v := .DetailsMap}}
+                            <div><dt>{{$k}}</dt><dd>{{fmtval $v}}</dd></div>
+                            {{end}}
+                        </dl>
+                    </details>
+                    {{end}}
+                {{else}}
+                    <code class="audit-details">{{.Details}}</code>
+                {{end}}
+            </td>
+            <td><button class="btn-copy" onclick="copyRow(this)" title="Copy row">Copy</button></td>
+        </tr>
+        {{end}}
+    </tbody>
+</table>
+
+<div class="pagination">
+    {{if .HasPrev}}<a href="{{prefix}}/audit?page={{.PrevPage}}" class="btn">Previous</a>{{end}}
+    {{if .HasNext}}<a href="{{prefix}}/audit?page={{.NextPage}}" class="btn">Next</a>{{end}}
+</div>
+{{else}}
+<p class="empty">No audit log entries yet.</p>
+{{end}}
+
+<script>
+// Collapse whitespace in an element's text. Returns "" for a missing element.
+function cellText(el) {
+    return el ? el.textContent.replace(/\s+/g, " ").trim() : "";
+}
+
+// The details cell renders a <dl> of key/value pairs inside a <details>
+// disclosure. textContent on the whole cell glues the "details" summary word
+// and every dt straight onto its dd ("reasonno_matching_policies refrefs/..."),
+// so build the field list from the <dl> structure instead, as "key=value".
+function detailsText(cell) {
+    var dl = cell.querySelector("dl.detail-list");
+    if (dl) {
+        var pairs = [];
+        dl.querySelectorAll("div").forEach(function(div) {
+            var dt = cellText(div.querySelector("dt"));
+            var dd = cellText(div.querySelector("dd"));
+            if (dt) pairs.push(dt + "=" + dd);
+        });
+        if (pairs.length) return pairs.join(", ");
+    }
+    // No structured map: fall back to the summary or the raw JSON cell.
+    return cellText(cell.querySelector(".audit-summary")) ||
+           cellText(cell.querySelector(".audit-details")) ||
+           cellText(cell);
+}
+
+function copyRow(btn) {
+    var row = btn.closest("tr");
+    var cells = row.querySelectorAll("td");
+    if (cells.length < 5) return;
+    // Render actor as "display (subtext)" when a subtext line is present.
+    var sub = cellText(cells[2].querySelector(".actor-subtext"));
+    var actor = cellText(cells[2]);
+    if (sub) {
+        actor = actor.slice(0, actor.length - sub.length).trim() + " (" + sub + ")";
+    }
+    var parts = [
+        "Time: " + cellText(cells[0]),
+        "Action: " + cellText(cells[1]),
+        "Actor: " + actor,
+        "Resource: " + cellText(cells[3]),
+        "Details: " + detailsText(cells[4]),
+    ];
+    navigator.clipboard.writeText(parts.join(" | ")).then(function() {
+        btn.textContent = "Copied";
+        btn.classList.add("copied");
+        setTimeout(function() {
+            btn.textContent = "Copy";
+            btn.classList.remove("copied");
+        }, 1500);
+    });
+}
+</script>
+
+{{template "foot" .}}

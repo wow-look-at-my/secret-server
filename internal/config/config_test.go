@@ -2,10 +2,10 @@ package config
 
 import (
 	"encoding/hex"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"os"
 	"testing"
-	"github.com/wow-look-at-my/testify/assert"
-	"github.com/wow-look-at-my/testify/require"
 )
 
 func setEnv(t *testing.T, kvs map[string]string) {
@@ -22,9 +22,10 @@ func validEnv(t *testing.T) {
 		key[i] = byte(i)
 	}
 	setEnv(t, map[string]string{
-		"ENCRYPTION_KEY":		hex.EncodeToString(key),
-		"CF_ACCESS_TEAM_DOMAIN":	"myteam",
-		"CF_ACCESS_ADMIN_AUDIENCE":		"aud123",
+		"ENCRYPTION_KEY":           hex.EncodeToString(key),
+		"CF_ACCESS_TEAM_DOMAIN":    "myteam",
+		"CF_ACCESS_ADMIN_AUDIENCE": "aud123",
+		"OIDC_AUDIENCE":            "https://secrets.example.com",
 	})
 }
 
@@ -43,15 +44,17 @@ func TestLoadValid(t *testing.T) {
 
 	assert.Equal(t, "aud123", cfg.CFAccessAdminAudience)
 
+	assert.Equal(t, "https://secrets.example.com", cfg.OIDCAudience)
+
 }
 
 func TestLoadCustomValues(t *testing.T) {
 	validEnv(t)
 	setEnv(t, map[string]string{
-		"LISTEN_ADDR":		":9090",
-		"DATABASE_PATH":	"/tmp/test.db",
-		"OIDC_AUDIENCE":	"https://secrets.example.com",
-		"LOG_LEVEL":		"debug",
+		"LISTEN_ADDR":   ":9090",
+		"DATABASE_PATH": "/tmp/test.db",
+		"OIDC_AUDIENCE": "https://secrets.example.com",
+		"LOG_LEVEL":     "debug",
 	})
 	cfg, err := Load()
 	require.Nil(t, err)
@@ -68,9 +71,9 @@ func TestLoadCustomValues(t *testing.T) {
 
 func TestLoadMissingEncryptionKey(t *testing.T) {
 	setEnv(t, map[string]string{
-		"ENCRYPTION_KEY":		"",
-		"CF_ACCESS_TEAM_DOMAIN":	"team",
-		"CF_ACCESS_ADMIN_AUDIENCE":		"aud",
+		"ENCRYPTION_KEY":           "",
+		"CF_ACCESS_TEAM_DOMAIN":    "team",
+		"CF_ACCESS_ADMIN_AUDIENCE": "aud",
 	})
 	os.Unsetenv("ENCRYPTION_KEY")
 	_, err := Load()
@@ -80,9 +83,9 @@ func TestLoadMissingEncryptionKey(t *testing.T) {
 
 func TestLoadBadHexKey(t *testing.T) {
 	setEnv(t, map[string]string{
-		"ENCRYPTION_KEY":		"not-hex",
-		"CF_ACCESS_TEAM_DOMAIN":	"team",
-		"CF_ACCESS_ADMIN_AUDIENCE":		"aud",
+		"ENCRYPTION_KEY":           "not-hex",
+		"CF_ACCESS_TEAM_DOMAIN":    "team",
+		"CF_ACCESS_ADMIN_AUDIENCE": "aud",
 	})
 	_, err := Load()
 	require.NotNil(t, err)
@@ -91,9 +94,9 @@ func TestLoadBadHexKey(t *testing.T) {
 
 func TestLoadWrongKeyLength(t *testing.T) {
 	setEnv(t, map[string]string{
-		"ENCRYPTION_KEY":		hex.EncodeToString(make([]byte, 16)),
-		"CF_ACCESS_TEAM_DOMAIN":	"team",
-		"CF_ACCESS_ADMIN_AUDIENCE":		"aud",
+		"ENCRYPTION_KEY":           hex.EncodeToString(make([]byte, 16)),
+		"CF_ACCESS_TEAM_DOMAIN":    "team",
+		"CF_ACCESS_ADMIN_AUDIENCE": "aud",
 	})
 	_, err := Load()
 	require.NotNil(t, err)
@@ -103,9 +106,9 @@ func TestLoadWrongKeyLength(t *testing.T) {
 func TestLoadMissingCFTeamDomain(t *testing.T) {
 	key := make([]byte, 32)
 	setEnv(t, map[string]string{
-		"ENCRYPTION_KEY":		hex.EncodeToString(key),
-		"CF_ACCESS_TEAM_DOMAIN":	"",
-		"CF_ACCESS_ADMIN_AUDIENCE":		"aud",
+		"ENCRYPTION_KEY":           hex.EncodeToString(key),
+		"CF_ACCESS_TEAM_DOMAIN":    "",
+		"CF_ACCESS_ADMIN_AUDIENCE": "aud",
 	})
 	os.Unsetenv("CF_ACCESS_TEAM_DOMAIN")
 	_, err := Load()
@@ -116,11 +119,20 @@ func TestLoadMissingCFTeamDomain(t *testing.T) {
 func TestLoadMissingCFAudience(t *testing.T) {
 	key := make([]byte, 32)
 	setEnv(t, map[string]string{
-		"ENCRYPTION_KEY":		hex.EncodeToString(key),
-		"CF_ACCESS_TEAM_DOMAIN":	"team",
-		"CF_ACCESS_ADMIN_AUDIENCE":		"",
+		"ENCRYPTION_KEY":           hex.EncodeToString(key),
+		"CF_ACCESS_TEAM_DOMAIN":    "team",
+		"CF_ACCESS_ADMIN_AUDIENCE": "",
 	})
 	os.Unsetenv("CF_ACCESS_ADMIN_AUDIENCE")
+	_, err := Load()
+	require.NotNil(t, err)
+
+}
+
+func TestLoadMissingOIDCAudience(t *testing.T) {
+	validEnv(t)
+	t.Setenv("OIDC_AUDIENCE", "")
+	os.Unsetenv("OIDC_AUDIENCE")
 	_, err := Load()
 	require.NotNil(t, err)
 
