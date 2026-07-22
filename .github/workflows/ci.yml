@@ -6,6 +6,8 @@ on:
 permissions:
   contents: read
   id-token: write
+  actions: read
+  checks: read
 
 jobs:
   build:

@@ -29,24 +29,24 @@
 
     <div class="form-group">
         <label for="repository_patterns">Repository Patterns</label>
-        <textarea id="repository_patterns" name="repository_patterns" required rows="3"
+        <textarea id="repository_patterns" name="repository_patterns" rows="3"
             placeholder="wow-look-at-my/*&#10;owner/repo">{{if not .IsNew}}{{joinLines .Policy.RepositoryPatterns}}{{end}}</textarea>
-        <div class="hint">One glob per line. A request is allowed if the repository matches any of these. Use owner/repo for a single repo, or owner/* for all repos in an org.</div>
+        <div class="hint">One SQLite GLOB pattern per line. A request is allowed if the repository matches any of these. Leave blank to create the policy with no repository patterns &mdash; an empty policy matches nothing (grants no access) until you add patterns, so it is safe to fill in later.</div>
     </div>
 
     <div id="pattern-fields">
         <div class="form-group">
             <label for="ref_patterns">Ref Patterns</label>
             <textarea id="ref_patterns" name="ref_patterns" rows="3"
-                placeholder="refs/heads/main&#10;refs/tags/v*">{{if .IsNew}}*{{else}}{{joinLines .Policy.RefPatterns}}{{end}}</textarea>
-            <div class="hint">One glob per line. Git ref filter (e.g. refs/heads/main). Use * to allow any branch or tag. Leave blank to match any ref.</div>
+                placeholder="refs/heads/main&#10;refs/tags/v*">{{if not .IsNew}}{{joinLines .Policy.RefPatterns}}{{end}}</textarea>
+            <div class="hint">One SQLite GLOB per line. Git ref filter (e.g. <code>refs/heads/main</code>). Leave blank to match nothing (no implicit wildcard) &mdash; write <code>*</code> explicitly to match any ref.</div>
         </div>
 
         <div class="form-group">
             <label for="actor_patterns">Actor Patterns</label>
             <textarea id="actor_patterns" name="actor_patterns" rows="3"
-                placeholder="octocat&#10;my-team-*">{{if .IsNew}}*{{else}}{{joinLines .Policy.ActorPatterns}}{{end}}</textarea>
-            <div class="hint">One glob per line. GitHub username filter for who triggered the workflow. Use * to allow any actor. Leave blank to match any actor.</div>
+                placeholder="octocat&#10;my-team-*">{{if not .IsNew}}{{joinLines .Policy.ActorPatterns}}{{end}}</textarea>
+            <div class="hint">One SQLite GLOB per line. GitHub username filter. Leave blank to match nothing (no implicit wildcard) &mdash; write <code>*</code> explicitly to match any actor.</div>
         </div>
     </div>
 
@@ -56,26 +56,9 @@
             <input type="text" id="github_environment" name="github_environment"
                 value="{{if not .IsNew}}{{.Policy.GitHubEnvironment}}{{end}}"
                 placeholder="e.g. production">
-            <div class="hint">The exact GitHub Actions environment name from the workflow's <code>environment:</code> field. GitHub enforces branch restrictions, required reviewers, and wait timers for this environment — the secret-server trusts that enforcement.</div>
+            <div class="hint">The exact GitHub Actions environment name from the workflow's <code>environment:</code> field. GitHub enforces branch restrictions, required reviewers, and wait timers for this environment &mdash; the secret-server trusts that enforcement.</div>
         </div>
     </div>
-
-    <div class="form-group">
-        <label for="env_id">Project / Environment</label>
-        {{if .Environments}}
-        <select id="env_id" name="env_id" required>
-            <option value="">-- Select Environment --</option>
-            {{range .Environments}}
-            <option value="{{.ID}}"
-                {{if and (not $.IsNew) (eq $.Policy.EnvironmentID .ID)}}selected{{end}}>
-                {{.Project}} / {{.Environment}}
-            </option>
-            {{end}}
-        </select>
-        {{else}}
-        <p class="no-env">No environments defined yet. <a href="{{prefix}}/environments/new">Create one</a> first.</p>
-        {{end}}
-        <div class="hint">The project and environment whose secrets this policy grants access to. <a href="{{prefix}}/environments">Manage environments</a>.</div>
     </div>
 
     <div class="actions">
@@ -99,5 +82,7 @@ function toggleMode() {
 }
 toggleMode();
 </script>
+
+<p class="page-desc">After creating the policy, attach it to one or more nodes in the <a href="{{prefix}}/secrets">secret tree</a> to grant access to those nodes.</p>
 
 {{template "foot" .}}

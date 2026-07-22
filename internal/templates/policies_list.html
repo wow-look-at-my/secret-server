@@ -5,7 +5,7 @@
     <h1>Access Policies</h1>
     <a href="{{prefix}}/policies/new" class="btn btn-primary">New Policy</a>
 </div>
-<p class="page-desc">Access policies control which GitHub repositories can fetch secrets. Each policy grants a repository pattern access to all secrets in a specific project and environment.</p>
+<p class="page-desc">Access policies are pattern-match rules. A policy matches a GitHub Actions request when its repository, ref, and actor patterns all allow the request. Attach policies to nodes in the secret tree to grant that policy access to those nodes and all descendants.</p>
 
 {{if .}}
 <table>
@@ -17,8 +17,7 @@
             <th>Ref Patterns</th>
             <th>Actor Patterns</th>
             <th>GitHub Env</th>
-            <th>Project</th>
-            <th>Environment</th>
+            <th>Attached</th>
             <th>Actions</th>
         </tr>
     </thead>
@@ -31,11 +30,10 @@
             <td>{{if eq .Mode "github-environment"}}<span class="muted">n/a</span>{{else}}{{range $i, $p := .RefPatterns}}{{if $i}}, {{end}}<code>{{$p}}</code>{{end}}{{end}}</td>
             <td>{{if eq .Mode "github-environment"}}<span class="muted">n/a</span>{{else}}{{range $i, $p := .ActorPatterns}}{{if $i}}, {{end}}<code>{{$p}}</code>{{end}}{{end}}</td>
             <td>{{if .GitHubEnvironment}}<code>{{.GitHubEnvironment}}</code>{{else}}<span class="muted">-</span>{{end}}</td>
-            <td>{{.Project}}</td>
-            <td>{{.Environment}}</td>
+            <td>{{.AttachedNodeCount}} node(s)</td>
             <td>
                 <a href="{{prefix}}/policies/{{.ID}}/edit" class="btn btn-sm">Edit</a>
-                <form class="inline" method="post" action="{{prefix}}/policies/{{.ID}}/delete" onsubmit="return confirm('Delete this policy?')">
+                <form class="inline" method="post" action="{{prefix}}/policies/{{.ID}}/delete" onsubmit="return confirm('Delete this policy? All node attachments will be removed.')">
                     {{with csrfToken}}<input type="hidden" name="csrf_token" value="{{.}}">{{end}}
                     <button type="submit" class="btn btn-sm btn-danger">Delete</button>
                 </form>

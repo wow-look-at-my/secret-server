@@ -36,8 +36,13 @@ func (h *PublicHandler) logAccessDenied(actorType, actorID, reason string, extra
 	}
 }
 
+// fetchSecrets is the hot path for GitHub Actions. It validates an OIDC
+// token, matches the claims against policy pattern rows via a single
+// SQLite-side GLOB query, then resolves the matching policy IDs to
+// authorized leaf secrets through a recursive CTE. The response shape
+// is `{secret_name: plaintext}` — secret names are globally unique so
+// there is no collision to handle.
 func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
-	// Limit request body to prevent abuse (this is a GET endpoint but limit anyway).
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 
 	authHeader := r.Header.Get("Authorization")
@@ -49,6 +54,15 @@ func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	token := strings.TrimPrefix(authHeader, "Bearer ")
+
+	// Two credential types share this endpoint. A machine token (for non-Actions
+	// clients that can't present an OIDC JWT, e.g. webhook-runner hooks) is
+	// recognizable by its prefix; anything else is validated as an OIDC token.
+	// One route → no extra Cloudflare Access bypass path to configure.
+	if strings.HasPrefix(token, database.MachineTokenPrefix) {
+		h.fetchSecretsMachine(w, r, token)
+		return
+	}
 
 	claims, err := h.oidc.ValidateToken(r.Context(), token)
 	if err != nil {
@@ -69,7 +83,7 @@ func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
 		"environment", claims.Environment,
 	)
 
-	policies, err := h.db.MatchingPolicies(claims.Repository, claims.Ref, claims.Actor, claims.Environment)
+	policyIDs, err := h.db.MatchingPolicyIDs(r.Context(), claims.Repository, claims.Ref, claims.Actor, claims.Environment)
 	if err != nil {
 		slog.Error("failed to match policies", "error", err)
 		h.logAccessDenied("github_actions", claims.Repository, "policy_lookup_error", map[string]any{
@@ -83,7 +97,7 @@ func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(policies) == 0 {
+	if len(policyIDs) == 0 {
 		slog.Info("no matching policies",
 			"repository", claims.Repository,
 			"ref", claims.Ref,
@@ -99,39 +113,20 @@ func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Collect secrets from all matching policies (deduplicate by environment ID)
-	result := make(map[string]string)
-	seen := make(map[string]bool)
-	for _, p := range policies {
-		if seen[p.EnvironmentID] {
-			continue
-		}
-		seen[p.EnvironmentID] = true
-
-		secrets, err := h.db.GetSecretsByEnvironmentID(p.EnvironmentID)
-		if err != nil {
-			slog.Error("failed to get secrets", "project", p.Project, "environment", p.Environment, "error", err)
-			h.logAccessDenied("github_actions", claims.Repository, "secret_retrieval_error", map[string]any{
-				"repository":  claims.Repository,
-				"ref":         claims.Ref,
-				"actor":       claims.Actor,
-				"workflow":    claims.Workflow,
-				"project":     p.Project,
-				"environment": p.Environment,
-				"error":       err.Error(),
-			})
-			http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
-			return
-		}
-		for k, v := range secrets {
-			result[k] = v
-		}
+	secrets, err := h.db.AuthorizedSecrets(r.Context(), policyIDs)
+	if err != nil {
+		slog.Error("failed to load authorized secrets", "error", err)
+		h.logAccessDenied("github_actions", claims.Repository, "secret_retrieval_error", map[string]any{
+			"repository": claims.Repository,
+			"ref":        claims.Ref,
+			"actor":      claims.Actor,
+			"workflow":   claims.Workflow,
+			"error":      err.Error(),
+		})
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
 	}
 
-	policyIDs := make([]string, len(policies))
-	for i, p := range policies {
-		policyIDs[i] = p.ID
-	}
 	details, _ := json.Marshal(map[string]any{
 		"repository":    claims.Repository,
 		"ref":           claims.Ref,
@@ -139,12 +134,71 @@ func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
 		"workflow":      claims.Workflow,
 		"environment":   claims.Environment,
 		"policies":      policyIDs,
-		"secrets_count": len(result),
+		"secrets_count": len(secrets),
 	})
-	if err := h.audit.CreateEntry("secret.access", "github_actions", claims.Repository, "secret", "", string(details)); err != nil {
+	if err := h.audit.CreateEntry("secret.access.granted", "github_actions", claims.Repository, "secret", "", string(details)); err != nil {
 		slog.Error("audit log failed", "error", err)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	json.NewEncoder(w).Encode(secrets)
+}
+
+// fetchSecretsMachine vends secrets to a machine token — a bearer credential
+// for clients that can't present a GitHub OIDC JWT (e.g. webhook-runner hooks).
+// The token is bound to one policy and vends exactly that policy's authorized
+// secrets, via the same AuthorizedSecrets path the OIDC flow uses. Mirrors
+// fetchSecrets' audit/deny shape; the token itself is never logged.
+func (h *PublicHandler) fetchSecretsMachine(w http.ResponseWriter, r *http.Request, token string) {
+	rec, err := h.db.LookupMachineToken(token)
+	if err != nil {
+		slog.Error("machine token lookup failed", "error", err)
+		h.logAccessDenied("machine_token", "unknown", "machine_token_lookup_error", map[string]any{
+			"remote_addr": r.RemoteAddr,
+			"error":       err.Error(),
+		})
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+	if rec == nil {
+		// Unknown or revoked token. Never echo the token itself.
+		h.logAccessDenied("machine_token", "unknown", "invalid_machine_token", map[string]any{
+			"remote_addr": r.RemoteAddr,
+		})
+		http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+		return
+	}
+
+	slog.Info("machine token validated",
+		"token_id", rec.ID,
+		"token_name", rec.Name,
+	)
+
+	// Record usage best-effort — a failed timestamp update must not block the vend.
+	if err := h.db.TouchMachineToken(rec.ID); err != nil {
+		slog.Warn("failed to record machine token usage", "token_id", rec.ID, "error", err)
+	}
+
+	secrets, err := h.db.AuthorizedSecretsForToken(r.Context(), rec.ID)
+	if err != nil {
+		slog.Error("failed to load secrets for machine token", "token_id", rec.ID, "error", err)
+		h.logAccessDenied("machine_token", rec.Name, "secret_retrieval_error", map[string]any{
+			"token_id": rec.ID,
+			"error":    err.Error(),
+		})
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	details, _ := json.Marshal(map[string]any{
+		"token_id":      rec.ID,
+		"token_name":    rec.Name,
+		"secrets_count": len(secrets),
+	})
+	if err := h.audit.CreateEntry("secret.access.granted", "machine_token", rec.Name, "secret", "", string(details)); err != nil {
+		slog.Error("audit log failed", "error", err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(secrets)
 }
