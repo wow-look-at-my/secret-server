@@ -3,8 +3,8 @@ package handlers
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/wow-look-at-my/secret-server/internal/database"
-	"github.com/wow-look-at-my/testify/assert"
 )
 
 func TestToAuditViewsGitHubActions(t *testing.T) {
