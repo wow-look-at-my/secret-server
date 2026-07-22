@@ -77,8 +77,8 @@ func (v *GitHubOIDCValidator) ValidateToken(ctx context.Context, tokenString str
 	}
 
 	expected := jwt.Expected{
-		Issuer:   "https://token.actions.githubusercontent.com",
-		Time:     time.Now(),
+		Issuer: "https://token.actions.githubusercontent.com",
+		Time:   time.Now(),
 	}
 	if v.audience != "" {
 		expected.AnyAudience = []string{v.audience}

@@ -11,11 +11,11 @@ import (
 )
 
 type Config struct {
-	ListenAddr         string
-	DatabasePath       string
-	AuditDatabasePath  string
-	EncryptionKey      []byte
-	CSRFKey            []byte
+	ListenAddr            string
+	DatabasePath          string
+	AuditDatabasePath     string
+	EncryptionKey         []byte
+	CSRFKey               []byte
 	CFAccessTeamDomain    string
 	CFAccessAdminAudience string
 	OIDCAudience          string
@@ -24,13 +24,13 @@ type Config struct {
 
 func Load() (*Config, error) {
 	cfg := &Config{
-		ListenAddr:         envOrDefault("LISTEN_ADDR", ":8080"),
-		DatabasePath:       envOrDefault("DATABASE_PATH", "./secrets.db"),
-		AuditDatabasePath:  envOrDefault("AUDIT_DATABASE_PATH", "./audit.db"),
-		CFAccessTeamDomain: os.Getenv("CF_ACCESS_TEAM_DOMAIN"),
-		CFAccessAdminAudience:  os.Getenv("CF_ACCESS_ADMIN_AUDIENCE"),
-		OIDCAudience:      os.Getenv("OIDC_AUDIENCE"),
-		LogLevel:          envOrDefault("LOG_LEVEL", "info"),
+		ListenAddr:            envOrDefault("LISTEN_ADDR", ":8080"),
+		DatabasePath:          envOrDefault("DATABASE_PATH", "./secrets.db"),
+		AuditDatabasePath:     envOrDefault("AUDIT_DATABASE_PATH", "./audit.db"),
+		CFAccessTeamDomain:    os.Getenv("CF_ACCESS_TEAM_DOMAIN"),
+		CFAccessAdminAudience: os.Getenv("CF_ACCESS_ADMIN_AUDIENCE"),
+		OIDCAudience:          os.Getenv("OIDC_AUDIENCE"),
+		LogLevel:              envOrDefault("LOG_LEVEL", "info"),
 	}
 
 	keyHex := os.Getenv("ENCRYPTION_KEY")

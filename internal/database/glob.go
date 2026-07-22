@@ -2,72 +2,56 @@ package database
 
 import (
 	"fmt"
-	"path"
+
 	"strings"
 )
 
-// matchGlob matches a pattern against a value using path.Match semantics.
-// The pattern can use * to match any sequence within a single path segment,
-// and ** to match zero or more complete path segments (crossing / boundaries).
-// A bare "*" pattern matches everything (special case).
-func matchGlob(pattern, value string) (bool, error) {
-	if pattern == "*" {
-		return true, nil
-	}
-	if !strings.Contains(pattern, "**") {
-		return path.Match(pattern, value)
-	}
-	return matchDoublestar(strings.Split(pattern, "/"), strings.Split(value, "/"))
-}
-
-// matchDoublestar recursively matches pattern segments against value segments.
-// A "**" segment matches zero or more value segments.
-func matchDoublestar(pat, val []string) (bool, error) {
-	for len(pat) > 0 {
-		if pat[0] == "**" {
-			pat = pat[1:]
-			if len(pat) == 0 {
-				return true, nil // trailing ** matches everything remaining
-			}
-			for i := 0; i <= len(val); i++ {
-				ok, err := matchDoublestar(pat, val[i:])
-				if err != nil {
-					return false, err
-				}
-				if ok {
-					return true, nil
-				}
-			}
-			return false, nil
-		}
-		if len(val) == 0 {
-			return false, nil
-		}
-		ok, err := path.Match(pat[0], val[0])
-		if err != nil {
-			return false, err
-		}
-		if !ok {
-			return false, nil
-		}
-		pat = pat[1:]
-		val = val[1:]
-	}
-	return len(val) == 0, nil
-}
-
-// ValidatePatterns returns a non-nil error if any pattern in the slice
-// is syntactically invalid.
+// ValidatePatterns returns a non-nil error if any pattern in the slice is
+// syntactically invalid as a SQLite GLOB pattern. GLOB is forgiving: any
+// sequence of characters is technically a valid pattern, but unterminated
+// character classes (`[...`) are a write-time bug we can catch here.
+//
+// Glob-matching itself lives inside SQLite (used via the GLOB operator in
+// internal/database/policies.go MatchingPolicyIDs) — there is no Go-side
+// matcher to keep in sync.
 func ValidatePatterns(patterns []string) error {
 	for _, p := range patterns {
-		for _, seg := range strings.Split(p, "/") {
-			if seg == "**" {
-				continue
-			}
-			if _, err := path.Match(seg, ""); err != nil {
-				return fmt.Errorf("invalid glob pattern %q: %w", p, err)
-			}
+		if err := validateGlob(p); err != nil {
+			return fmt.Errorf("invalid glob pattern %q: %w", p, err)
 		}
+	}
+	return nil
+}
+
+func validateGlob(p string) error {
+	// Walk the pattern looking for an unclosed `[...` character class.
+	// Backslashes escape the following character inside a class.
+	inClass := false
+	i := 0
+	for i < len(p) {
+		c := p[i]
+		switch {
+		case !inClass && c == '[':
+			inClass = true
+			i++
+			// First character after `[` may be `]` (literal).
+			if i < len(p) && p[i] == ']' {
+				i++
+			}
+		case inClass && c == ']':
+			inClass = false
+			i++
+		case inClass && c == '\\' && i+1 < len(p):
+			i += 2
+		default:
+			i++
+		}
+	}
+	if inClass {
+		return fmt.Errorf("unclosed character class")
+	}
+	if strings.TrimSpace(p) == "" {
+		return fmt.Errorf("pattern is empty or whitespace-only")
 	}
 	return nil
 }
