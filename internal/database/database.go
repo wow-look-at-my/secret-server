@@ -70,6 +70,9 @@ func (d *DB) migrate() error {
 	if err := d.migrateMachineTokensPolicyOptional(); err != nil {
 		return fmt.Errorf("migrate machine tokens: %w", err)
 	}
+	if err := d.migrateMachineTokenGitHubAttestationPermission(); err != nil {
+		return fmt.Errorf("migrate machine token GitHub attestation permission: %w", err)
+	}
 
 	// Fresh install or already on the composite schema — create tables with
 	// the current schema (IF NOT EXISTS makes this idempotent).
@@ -77,6 +80,28 @@ func (d *DB) migrate() error {
 		return fmt.Errorf("create schema: %w", err)
 	}
 	return nil
+}
+
+// migrateMachineTokenGitHubAttestationPermission adds the explicit capability
+// used by Agent Host to attest which signed-in GitHub user performed a push.
+// It is deliberately false for every existing token: a token that can read a
+// small set of secrets must not automatically gain authority to assert human
+// identities for unrelated policies.
+func (d *DB) migrateMachineTokenGitHubAttestationPermission() error {
+	exists, err := d.tableExists("machine_tokens")
+	if err != nil || !exists {
+		return err
+	}
+	hasColumn, err := d.columnExists("machine_tokens", "can_attest_github_pushes")
+	if err != nil || hasColumn {
+		return err
+	}
+	_, err = d.db.Exec(
+		`ALTER TABLE machine_tokens
+		 ADD COLUMN can_attest_github_pushes INTEGER NOT NULL DEFAULT 0
+		 CHECK (can_attest_github_pushes IN (0, 1))`,
+	)
+	return err
 }
 
 // columnExists reports whether table has a column named column. A missing
@@ -272,6 +297,8 @@ func (d *DB) createCompositeSchema(exec sqlExecer) error {
 			token_hash   TEXT NOT NULL UNIQUE,
 			token_prefix TEXT NOT NULL DEFAULT '',
 			policy_id    TEXT REFERENCES access_policies(id) ON DELETE SET NULL,
+			can_attest_github_pushes INTEGER NOT NULL DEFAULT 0
+				CHECK (can_attest_github_pushes IN (0, 1)),
 			created_at   DATETIME NOT NULL DEFAULT (datetime('now')),
 			last_used_at DATETIME
 		)`,
@@ -284,6 +311,22 @@ func (d *DB) createCompositeSchema(exec sqlExecer) error {
 			PRIMARY KEY (token_id, node_id)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_machine_token_nodes_node ON machine_token_nodes(node_id)`,
+		// A successful Git smart-HTTP push through Agent Host is bound to the
+		// exact repository, ref, and commit SHA plus the OAuth user's immutable
+		// GitHub ID. GitHub Actions later joins its signed OIDC claims to this
+		// row when GitHub itself reports the GitHub App as the workflow actor.
+		`CREATE TABLE IF NOT EXISTS github_push_provenance (
+			repository       TEXT NOT NULL COLLATE NOCASE,
+			ref              TEXT NOT NULL,
+			sha              TEXT NOT NULL COLLATE NOCASE,
+			github_user_id   TEXT NOT NULL,
+			github_login     TEXT NOT NULL,
+			machine_token_id TEXT NOT NULL,
+			attested_at      DATETIME NOT NULL,
+			PRIMARY KEY (repository, ref, sha)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_github_push_provenance_user
+			ON github_push_provenance(github_user_id)`,
 	}
 	for _, s := range stmts {
 		if _, err := exec.ExecContext(context.Background(), s); err != nil {

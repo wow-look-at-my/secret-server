@@ -32,13 +32,14 @@ const machineTokenRandomBytes = 32
 // two ways, either or both: by attaching directly to secret-tree nodes (see
 // machine_token_nodes) and/or via an optional bound policy (PolicyID).
 type MachineToken struct {
-	ID          string
-	Name        string
-	TokenPrefix string  // first chars of the token, for display ("sst_ab12…")
-	PolicyID    *string // optional bound policy; nil when the token grants only via direct attachments
-	PolicyName  *string // name of the bound policy (nil if unbound)
-	CreatedAt   time.Time
-	LastUsedAt  *time.Time // nil if never used
+	ID                    string
+	Name                  string
+	TokenPrefix           string  // first chars of the token, for display ("sst_ab12…")
+	PolicyID              *string // optional bound policy; nil when the token grants only via direct attachments
+	PolicyName            *string // name of the bound policy (nil if unbound)
+	CanAttestGitHubPushes bool    // separate authority; secret access alone cannot assert human identity
+	CreatedAt             time.Time
+	LastUsedAt            *time.Time // nil if never used
 }
 
 // ptrToNullString maps an optional policy id to a nullable column value,
@@ -147,6 +148,28 @@ func (d *DB) CreateMachineToken(name string, policyID *string, nodeIDs []string)
 // policy. An unknown node or policy ID fails the whole update with ErrNotFound,
 // leaving the prior grant untouched.
 func (d *DB) UpdateMachineToken(id string, policyID *string, nodeIDs []string) error {
+	return d.updateMachineToken(id, policyID, nodeIDs, nil)
+}
+
+// UpdateMachineTokenWithGitHubAttestation updates the ordinary secret grants
+// and the high-trust push-attestation capability in the same transaction. Admin
+// handlers use this form so a failed update cannot leave half of the requested
+// authorization applied.
+func (d *DB) UpdateMachineTokenWithGitHubAttestation(
+	id string,
+	policyID *string,
+	nodeIDs []string,
+	canAttest bool,
+) error {
+	return d.updateMachineToken(id, policyID, nodeIDs, &canAttest)
+}
+
+func (d *DB) updateMachineToken(
+	id string,
+	policyID *string,
+	nodeIDs []string,
+	canAttest *bool,
+) error {
 	if err := d.ensurePolicyExists(policyID); err != nil {
 		return err
 	}
@@ -169,6 +192,30 @@ func (d *DB) UpdateMachineToken(id string, policyID *string, nodeIDs []string) e
 	}
 	if err := attachNodesTx(ctx, q, id, nodeIDs); err != nil {
 		return err
+	}
+	if canAttest != nil {
+		value := 0
+		if *canAttest {
+			value = 1
+		}
+		result, err := tx.ExecContext(
+			ctx,
+			`UPDATE machine_tokens
+			 SET can_attest_github_pushes = ?
+			 WHERE id = ?`,
+			value,
+			id,
+		)
+		if err != nil {
+			return fmt.Errorf("set token GitHub attestation permission: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return ErrNotFound
+		}
 	}
 	return tx.Commit()
 }
@@ -276,7 +323,19 @@ func (d *DB) LookupMachineToken(token string) (*MachineToken, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query machine token: %w", err)
 	}
-	return machineTokenFromRow(row.ID, row.Name, row.TokenPrefix, row.PolicyID, row.PolicyName, row.CreatedAt, row.LastUsedAt), nil
+	rec := machineTokenFromRow(
+		row.ID,
+		row.Name,
+		row.TokenPrefix,
+		row.PolicyID,
+		row.PolicyName,
+		row.CreatedAt,
+		row.LastUsedAt,
+	)
+	if err := d.loadMachineTokenGitHubAttestation(rec); err != nil {
+		return nil, err
+	}
+	return rec, nil
 }
 
 // GetMachineToken returns one token by ID, or nil if it doesn't exist.
@@ -288,7 +347,19 @@ func (d *DB) GetMachineToken(id string) (*MachineToken, error) {
 	if err != nil {
 		return nil, fmt.Errorf("get machine token: %w", err)
 	}
-	return machineTokenFromRow(row.ID, row.Name, row.TokenPrefix, row.PolicyID, row.PolicyName, row.CreatedAt, row.LastUsedAt), nil
+	rec := machineTokenFromRow(
+		row.ID,
+		row.Name,
+		row.TokenPrefix,
+		row.PolicyID,
+		row.PolicyName,
+		row.CreatedAt,
+		row.LastUsedAt,
+	)
+	if err := d.loadMachineTokenGitHubAttestation(rec); err != nil {
+		return nil, err
+	}
+	return rec, nil
 }
 
 // machineTokenFromRow builds a MachineToken from the columns every token query
@@ -307,6 +378,15 @@ func machineTokenFromRow(id, name, prefix string, policyID, policyName sql.NullS
 		rec.LastUsedAt = &t
 	}
 	return rec
+}
+
+func (d *DB) loadMachineTokenGitHubAttestation(rec *MachineToken) error {
+	enabled, err := d.MachineTokenCanAttestGitHubPushes(context.Background(), rec.ID)
+	if err != nil {
+		return err
+	}
+	rec.CanAttestGitHubPushes = enabled
+	return nil
 }
 
 // ListTokenNodes returns the secret-tree nodes attached to a token (for display
@@ -381,7 +461,19 @@ func (d *DB) ListMachineTokens() ([]MachineToken, error) {
 	}
 	tokens := make([]MachineToken, len(rows))
 	for i, r := range rows {
-		tokens[i] = *machineTokenFromRow(r.ID, r.Name, r.TokenPrefix, r.PolicyID, r.PolicyName, r.CreatedAt, r.LastUsedAt)
+		rec := machineTokenFromRow(
+			r.ID,
+			r.Name,
+			r.TokenPrefix,
+			r.PolicyID,
+			r.PolicyName,
+			r.CreatedAt,
+			r.LastUsedAt,
+		)
+		if err := d.loadMachineTokenGitHubAttestation(rec); err != nil {
+			return nil, err
+		}
+		tokens[i] = *rec
 	}
 	return tokens, nil
 }

@@ -33,14 +33,24 @@ Machine-token example:
     curl -fsSL -H "Authorization: Bearer $SECRET_SERVER_TOKEN" \
       {{BASE_URL}}/github/v1/secrets
 
+The Agent Host control plane also uses HEAD/POST
+`{{BASE_URL}}/github/v1/push-provenance` with a machine token whose separate
+push-attestation capability is enabled. That route is not for workflows or
+agent containers.
+
 ## How access is authorized
 
 - Secrets live in a tree of nodes: `secret` leaves and `group` composites.
 - Access policies are pattern-match rules attached to nodes. Each policy holds
   SQLite GLOB patterns of three kinds: `repository`, `ref`, and `actor`.
 - An OIDC request matches a policy only if at least one pattern of EACH kind
-  matches the token's claims. A policy with zero patterns of a kind matches
-  nothing -- fail-closed, no implicit wildcard; write `*` explicitly.
+  matches the repository, ref, and resolved actor. Actor patterns may target a
+  login or an immutable numeric GitHub account as `id:<number>`. A policy with
+  zero patterns of a kind matches nothing -- fail-closed, no implicit wildcard;
+  write `*` explicitly.
+- For an exact repository/ref/SHA previously attested by Agent Host after a
+  successful push, the resolved actor is the signed-in human. Otherwise it is
+  the actor from GitHub's signed OIDC token. Both are retained in the audit log.
 - A policy attached to a group grants every descendant leaf. Inheritance is
   additive: a leaf is vended if any matching policy sits on it or an ancestor.
 - A machine token grants secrets by direct attachment to secret-tree nodes
