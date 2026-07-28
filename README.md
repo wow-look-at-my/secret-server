@@ -7,6 +7,7 @@ Self-hosted secrets manager for homelab use. Single Go binary with SQLite storag
 | Zone | Routes | Auth | Access |
 |------|--------|------|--------|
 | GitHub API | `GET /github/v1/secrets` | GitHub Actions OIDC JWT **or** machine token | Read-only — vend authorized secrets |
+| GitHub provenance | `HEAD/POST /github/v1/push-provenance` | Attestation-enabled machine token | Agent Host control plane only — bind successful pushes to a human |
 | Admin API | `/admin/v1/*` | Cloudflare Access JWT | Manage the secret tree, policies, attachments, and machine tokens |
 | Admin UI | `/admin/*` | Cloudflare Access JWT | Web UI for the secret tree, policies, attachments, and machine tokens |
 
@@ -97,16 +98,17 @@ Policies are pure pattern-match rules that you **attach** to one or more nodes. 
 
 - **Repository patterns** — zero or more SQLite GLOB patterns matching repository names (e.g. `myorg/*`, `myorg/api-*`). A request matches if the repository matches **any** of the listed globs. Leaving this empty is allowed: the policy then has no repository patterns and matches nothing (see below), so you can create a placeholder policy now and add patterns later without granting any access in the meantime.
 - **Ref patterns** — one or more SQLite GLOB patterns matching git refs (e.g. `refs/heads/main`, `refs/tags/v*`). At least one is required (`*` for "any ref"). In the UI, leaving the field blank defaults to `*`.
-- **Actor patterns** — one or more SQLite GLOB patterns matching the GitHub username that triggered the workflow (e.g. `deploy-*`). At least one is required (`*` for "any actor"). In the UI, leaving the field blank defaults to `*`.
+- **Actor patterns** — zero or more SQLite GLOB patterns matching either the resolved GitHub login (e.g. `deploy-*`) or an explicit immutable account ID (e.g. `id:6569500`). Leaving this empty makes the policy match nothing; use `*` for any actor.
 
 A policy with zero patterns of any kind matches nothing — there is no implicit "empty = wildcard" behavior. This is fail-closed: an empty (or partially-filled) policy never grants access, which is what makes it safe to save an incomplete policy and finish it later. Patterns are stored as normalized rows in `policy_patterns(policy_id, kind, pattern)` so matching runs entirely inside SQLite via the native `GLOB` operator.
 
 When a GitHub Actions workflow requests secrets, the server:
 
 1. Validates the OIDC token.
-2. Finds every policy whose pattern rows all match the token's repository, ref, and actor claims (single SQL query via `GLOB` joins).
-3. Walks the secret tree via a recursive CTE to collect every leaf that is either directly attached to a matching policy or inherited from an ancestor that is.
-4. Decrypts the values and returns them as `{name: value}`.
+2. Resolves the actor. Ordinarily this is the login and immutable ID in the OIDC token. If Agent Host previously attested the exact repository/ref/SHA, the actor is instead the signed-in human who performed that successful push; the GitHub App actor remains in the audit details.
+3. Finds every policy whose pattern rows all match the repository, ref, and resolved actor login or `id:<numeric ID>` (single SQL query via `GLOB` joins).
+4. Walks the secret tree via a recursive CTE to collect every leaf that is either directly attached to a matching policy or inherited from an ancestor that is.
+5. Decrypts the values and returns them as `{name: value}`.
 
 A policy attached to a group grants access to **every descendant leaf** of that group. Inheritance is additive — a leaf is accessible as long as at least one matching policy is attached on the leaf itself or any of its ancestors.
 
@@ -123,7 +125,8 @@ GitHub Actions OIDC is the right credential for a workflow, but some clients can
 - **Shape:** `sst_<random>`. The server inspects the bearer token — the `sst_` prefix routes it to machine-token validation; anything else is validated as an OIDC JWT. Both share one route, so there is no extra Cloudflare Access bypass path to configure.
 - **Storage:** only the token's SHA-256 hash is stored. The plaintext is shown **once**, at creation or regeneration, and cannot be recovered — lose it and you regenerate (a fresh value in place) or revoke + reissue.
 - **Access — direct, a policy, or both:** a machine token grants secrets by attaching **directly to secret-tree nodes** (pick the exact secrets, or a group to grant its whole subtree) **and/or** by binding an **optional policy** (a reusable grant you can share across tokens). It vends the **union** of the two, using the same downward-walk resolution as the OIDC path. Direct attachment is the simple default — no policy and no repo/ref/actor patterns required; the policy's patterns are never consulted for a machine token. Deleting a secret cascades its attachment away; deleting a bound policy just unbinds it (the token survives).
-- **Management:** create, list (by name + prefix, showing the granted secrets and bound policy), edit (change the secrets and/or policy), regenerate (mint a fresh token value in place — same name, policy, and attachments; the old value stops working immediately), and revoke on the **Machine Tokens** admin page, or via `GET/POST/PUT/DELETE /admin/v1/machine-tokens` plus `POST /admin/v1/machine-tokens/{id}/regenerate` (create/update take `{name, policy_id?, node_ids?}`; create and regenerate return `{id, token}` — the only times the token is exposed).
+- **Push attestation:** a separate, default-off `can_attest_github_pushes` capability lets the Agent Host control plane call `HEAD/POST /github/v1/push-provenance`. This authority does not follow from secret attachments or a policy binding. Never enable it on tokens exposed to jobs, hooks, or agent containers.
+- **Management:** create, list (by name + prefix, showing the granted secrets, bound policy, and attestation capability), edit, regenerate, and revoke on the **Machine Tokens** admin page, or via `GET/POST/PUT/DELETE /admin/v1/machine-tokens` plus `POST /admin/v1/machine-tokens/{id}/regenerate` (create/update take `{name, policy_id?, node_ids?, can_attest_github_pushes?}`; create and regenerate return `{id, token}` — the only times the token is exposed).
 - **Audit:** every machine-token vend is recorded as `secret.access.granted` with actor type `machine_token`; denied attempts (unknown/revoked token) as `secret.access.denied`.
 
 ```bash
@@ -131,6 +134,25 @@ curl -fsSL -H "Authorization: Bearer $SECRET_SERVER_TOKEN" \
   https://secrets.example.com/github/v1/secrets
 # {"GITHUB_APP_PRIVATE_KEY":"-----BEGIN ...","AI_API_KEY":"..."}
 ```
+
+## Agent Host push attribution
+
+GitHub can report a GitHub App as the Actions actor even when a signed-in Agent
+Host user performed the push. Agent Host therefore keeps the user token in its
+control plane, parses the Git receive-pack status, and attests only refs GitHub
+reported as successfully updated. The attestation contains the exact
+repository, ref, commit SHA, human login, and immutable numeric GitHub user ID.
+
+Before forwarding a commit push, Agent Host performs an authenticated preflight
+so a missing or unauthorized Secret Server cannot silently lose attribution.
+After GitHub accepts the push, it records the successful refs. An Actions
+request uses that human identity only when its signed OIDC repository, ref, and
+SHA all match; otherwise it falls back to the OIDC actor. Both identities and
+the identity source are retained in the audit record.
+
+For Agent Host, enable **Allow this token to attest Agent Host GitHub pushes**
+on the machine token supplied as `AGENT_HOST_BUILDHOST_MACHINE_TOKEN`. The token
+never belongs in an agent session.
 
 ## Cloudflare Access Setup
 

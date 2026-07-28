@@ -25,6 +25,7 @@ type GitHubClaims struct {
 	ActorID         string `json:"actor_id"`
 	Workflow        string `json:"workflow"`
 	Ref             string `json:"ref"`
+	SHA             string `json:"sha"`
 	Environment     string `json:"environment"`
 }
 
@@ -87,9 +88,9 @@ func (v *GitHubOIDCValidator) ValidateToken(ctx context.Context, tokenString str
 	if err := stdClaims.Validate(expected); err != nil {
 		return nil, fmt.Errorf("validate standard claims: %w", err)
 	}
-	if customClaims.Repository == "" || customClaims.Ref == "" ||
+	if customClaims.Repository == "" || customClaims.Ref == "" || customClaims.SHA == "" ||
 		customClaims.Actor == "" || customClaims.ActorID == "" {
-		return nil, fmt.Errorf("validate GitHub claims: repository, ref, actor, and actor_id are required")
+		return nil, fmt.Errorf("validate GitHub claims: repository, ref, sha, actor, and actor_id are required")
 	}
 
 	customClaims.Subject = stdClaims.Subject

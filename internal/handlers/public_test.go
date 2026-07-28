@@ -159,7 +159,7 @@ func TestPublicFetchSecretsInvalidToken(t *testing.T) {
 	assert.Contains(t, entries[0].Details, `"reason":"invalid_token"`)
 }
 
-func TestPublicFetchSecretsPolicyDBError(t *testing.T) {
+func TestPublicFetchSecretsProvenanceDBError(t *testing.T) {
 	env := setupClosedMainDB(t)
 	h := NewPublicHandler(env.db, env.audit, env.oidc)
 	mux := chi.NewRouter()
@@ -179,7 +179,7 @@ func TestPublicFetchSecretsPolicyDBError(t *testing.T) {
 	assert.Equal(t, "secret.access.denied", entries[0].Action)
 	assert.Equal(t, "github_actions", entries[0].ActorType)
 	assert.Equal(t, "583231", entries[0].ActorID)
-	assert.Contains(t, entries[0].Details, `"reason":"policy_lookup_error"`)
+	assert.Contains(t, entries[0].Details, `"reason":"provenance_lookup_error"`)
 }
 
 func TestPublicFetchSecretsMultipleSecretsSamePolicy(t *testing.T) {

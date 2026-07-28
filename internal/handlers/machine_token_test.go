@@ -96,7 +96,7 @@ func TestAdminMachineTokenLifecycle(t *testing.T) {
 
 	nodeID := createSecret(t, env, "X", "y")
 
-	body := `{"name":"reconcile","node_ids":["` + nodeID + `"]}`
+	body := `{"name":"reconcile","node_ids":["` + nodeID + `"],"can_attest_github_pushes":true}`
 	req := jsonReq("POST", "/admin/v1/machine-tokens", body)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -108,6 +108,10 @@ func TestAdminMachineTokenLifecycle(t *testing.T) {
 	token := created["token"]
 	require.NotEmpty(t, id)
 	assert.True(t, strings.HasPrefix(token, "sst_"), "minted token should carry the sst_ prefix")
+	stored, err := env.db.GetMachineToken(id)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.True(t, stored.CanAttestGitHubPushes)
 
 	entries, err := env.audit.ListEntries(10, 0)
 	require.Nil(t, err)
@@ -136,6 +140,21 @@ func TestAdminMachineTokenLifecycle(t *testing.T) {
 	assert.Contains(t, rr.Body.String(), "reconcile")
 	assert.Contains(t, rr.Body.String(), `"X"`, "the list includes the granted node")
 	assert.NotContains(t, rr.Body.String(), token)
+
+	// Admin updates change ordinary grants and the high-trust capability
+	// together; omitting the checkbox-equivalent boolean revokes it.
+	req = jsonReq(
+		http.MethodPut,
+		"/admin/v1/machine-tokens/"+id,
+		`{"node_ids":["`+nodeID+`"],"can_attest_github_pushes":false}`,
+	)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusNoContent, rr.Code)
+	stored, err = env.db.GetMachineToken(id)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.False(t, stored.CanAttestGitHubPushes)
 
 	// Revoke it.
 	req = httptest.NewRequest("DELETE", "/admin/v1/machine-tokens/"+id, nil)

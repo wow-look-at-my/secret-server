@@ -114,12 +114,14 @@ func makeOIDCTokenWithActor(t *testing.T, jwk jose.JSONWebKey, repo, ref, actor 
 		Actor           string `json:"actor"`
 		ActorID         string `json:"actor_id"`
 		Ref             string `json:"ref"`
+		SHA             string `json:"sha"`
 	}{
 		Repository:      repo,
 		RepositoryOwner: strings.Split(repo, "/")[0],
 		Actor:           actor,
 		ActorID:         "583231",
 		Ref:             ref,
+		SHA:             strings.Repeat("a", 40),
 	}
 	token, err := jwt.Signed(signer).Claims(stdClaims).Claims(customClaims).Serialize()
 	require.Nil(t, err)

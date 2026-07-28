@@ -39,6 +39,7 @@ func TestValidateTokenValid(t *testing.T) {
 		ActorID         string `json:"actor_id"`
 		Workflow        string `json:"workflow"`
 		Ref             string `json:"ref"`
+		SHA             string `json:"sha"`
 		Environment     string `json:"environment"`
 	}{
 		Repository:      "myorg/myrepo",
@@ -47,6 +48,7 @@ func TestValidateTokenValid(t *testing.T) {
 		ActorID:         "583231",
 		Workflow:        "deploy",
 		Ref:             "refs/heads/main",
+		SHA:             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		Environment:     "production",
 	}
 
@@ -68,6 +70,7 @@ func TestValidateTokenValid(t *testing.T) {
 	assert.Equal(t, "583231", claims.ActorID)
 
 	assert.Equal(t, "refs/heads/main", claims.Ref)
+	assert.Equal(t, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", claims.SHA)
 
 	assert.Equal(t, "repo:myorg/myrepo:ref:refs/heads/main", claims.Subject)
 
