@@ -34,7 +34,7 @@ func TestUIMachineTokenCreateAndDelete(t *testing.T) {
 	mux := chi.NewRouter()
 	h.Register(mux)
 
-	form := "name=reconcile&node_ids=" + s.ID()
+	form := "name=reconcile&node_ids=" + s.ID() + "&can_attest_github_pushes=on"
 	req := httptest.NewRequest("POST", "/admin/machine-tokens", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
@@ -47,6 +47,7 @@ func TestUIMachineTokenCreateAndDelete(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, len(tokens))
 	id := tokens[0].ID
+	assert.True(t, tokens[0].CanAttestGitHubPushes)
 
 	req = httptest.NewRequest("GET", "/admin/machine-tokens", nil)
 	rr = httptest.NewRecorder()
