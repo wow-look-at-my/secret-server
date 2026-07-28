@@ -25,9 +25,10 @@ type machineTokenView struct {
 // union of its direct node_ids (a leaf grants that secret, a group its subtree)
 // and its optional bound policy_id (empty = no policy).
 type machineTokenRequest struct {
-	Name     string   `json:"name"`
-	PolicyID string   `json:"policy_id"`
-	NodeIDs  []string `json:"node_ids"`
+	Name                  string   `json:"name"`
+	PolicyID              string   `json:"policy_id"`
+	NodeIDs               []string `json:"node_ids"`
+	CanAttestGitHubPushes bool     `json:"can_attest_github_pushes"`
 }
 
 // validNodeIDs reports whether every id is a well-formed UUID.
@@ -107,8 +108,22 @@ func (h *AdminHandler) createMachineToken(w http.ResponseWriter, r *http.Request
 		http.Error(w, `{"error":"failed to create machine token"}`, http.StatusInternalServerError)
 		return
 	}
+	if err := h.db.SetMachineTokenGitHubAttestation(
+		r.Context(),
+		rec.ID,
+		req.CanAttestGitHubPushes,
+	); err != nil {
+		_ = h.db.DeleteMachineToken(rec.ID)
+		slog.Error("set machine token GitHub attestation permission failed", "error", err)
+		http.Error(w, `{"error":"failed to create machine token"}`, http.StatusInternalServerError)
+		return
+	}
 
-	details, _ := json.Marshal(map[string]any{"name": req.Name, "policy_id": req.PolicyID, "node_count": len(req.NodeIDs)})
+	details, _ := json.Marshal(map[string]any{
+		"name": req.Name, "policy_id": req.PolicyID,
+		"node_count":               len(req.NodeIDs),
+		"can_attest_github_pushes": req.CanAttestGitHubPushes,
+	})
 	if err := h.audit.CreateEntry("machine_token.create", "admin", adminActor(r), "machine_token", rec.ID, string(details)); err != nil {
 		slog.Error("audit log failed", "error", err)
 	}
@@ -152,7 +167,12 @@ func (h *AdminHandler) updateMachineToken(w http.ResponseWriter, r *http.Request
 		http.Error(w, `{"error":"machine token not found"}`, http.StatusNotFound)
 		return
 	}
-	if err := h.db.UpdateMachineToken(id, policyID, req.NodeIDs); err != nil {
+	if err := h.db.UpdateMachineTokenWithGitHubAttestation(
+		id,
+		policyID,
+		req.NodeIDs,
+		req.CanAttestGitHubPushes,
+	); err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			http.Error(w, `{"error":"the policy or one or more secrets were not found"}`, http.StatusBadRequest)
 			return
@@ -161,7 +181,10 @@ func (h *AdminHandler) updateMachineToken(w http.ResponseWriter, r *http.Request
 		http.Error(w, `{"error":"failed to update machine token"}`, http.StatusInternalServerError)
 		return
 	}
-	details, _ := json.Marshal(map[string]any{"policy_id": req.PolicyID, "node_count": len(req.NodeIDs)})
+	details, _ := json.Marshal(map[string]any{
+		"policy_id": req.PolicyID, "node_count": len(req.NodeIDs),
+		"can_attest_github_pushes": req.CanAttestGitHubPushes,
+	})
 	if err := h.audit.CreateEntry("machine_token.update", "admin", adminActor(r), "machine_token", id, string(details)); err != nil {
 		slog.Error("audit log failed", "error", err)
 	}

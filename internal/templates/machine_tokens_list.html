@@ -17,6 +17,7 @@
             <th>Token</th>
             <th>Secrets</th>
             <th>Policy</th>
+            <th>GitHub attester</th>
             <th>Created</th>
             <th>Last Used</th>
             <th>Actions</th>
@@ -29,6 +30,7 @@
             <td><code>{{.TokenPrefix}}…</code></td>
             <td>{{range .Nodes}}<span class="chip kind-{{.Kind}}" title="{{.Kind}}">{{.Name}}</span> {{else}}<span class="empty">none</span>{{end}}</td>
             <td>{{if .PolicyName}}{{.PolicyName}}{{else}}<span class="empty">—</span>{{end}}</td>
+            <td>{{if .CanAttestGitHubPushes}}yes{{else}}<span class="empty">no</span>{{end}}</td>
             <td>{{timeTag .CreatedAt}}</td>
             <td>{{if .LastUsedAt}}{{timeTag .LastUsedAt}}{{else}}<span class="empty">never</span>{{end}}</td>
             <td>
