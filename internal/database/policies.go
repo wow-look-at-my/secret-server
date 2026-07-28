@@ -544,7 +544,13 @@ JOIN policy_patterns pa ON pa.policy_id = p.id AND pa.kind = 'actor'
 WHERE p.mode = 'pattern'
   AND ? GLOB replace(pr.pattern, '[', '[[]')
   AND ? GLOB replace(pf.pattern, '[', '[[]')
-  AND ? GLOB replace(pa.pattern, '[', '[[]')
+  AND (
+    ? GLOB replace(pa.pattern, '[', '[[]')
+    OR (
+      ? != ''
+      AND ('id:' || ?) GLOB replace(pa.pattern, '[', '[[]')
+    )
+  )
 UNION
 SELECT DISTINCT p.id
 FROM access_policies p
@@ -567,7 +573,31 @@ WHERE p.mode = 'github-environment'
 // inside SQLite via its native GLOB operator; no rows cross the SQL boundary
 // other than the matching IDs.
 func (d *DB) MatchingPolicyIDs(ctx context.Context, repository, ref, actor, oidcEnvironment string) ([]string, error) {
-	rows, err := d.db.QueryContext(ctx, matchingPolicyIDsSQL, repository, ref, actor, repository, oidcEnvironment, oidcEnvironment)
+	return d.MatchingPolicyIDsForIdentity(ctx, repository, ref, actor, "", oidcEnvironment)
+}
+
+// MatchingPolicyIDsForIdentity also permits an actor pattern in the explicit
+// form "id:<numeric GitHub user ID>". Login patterns remain compatible, while
+// stable-ID policies survive account renames and can consume Agent Host push
+// provenance without trusting an editable commit author. The oidcEnvironment
+// parameter selects github-environment mode policies whose stored environment
+// name matches the OIDC token's environment claim.
+func (d *DB) MatchingPolicyIDsForIdentity(
+	ctx context.Context,
+	repository, ref, actor, actorID, oidcEnvironment string,
+) ([]string, error) {
+	rows, err := d.db.QueryContext(
+		ctx,
+		matchingPolicyIDsSQL,
+		repository,
+		ref,
+		actor,
+		actorID,
+		actorID,
+		repository,
+		oidcEnvironment,
+		oidcEnvironment,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("query matching policies: %w", err)
 	}

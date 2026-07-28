@@ -23,6 +23,8 @@ func NewPublicHandler(db *database.DB, audit *database.AuditDB, oidc *auth.GitHu
 
 func (h *PublicHandler) Register(r chi.Router) {
 	r.Get(GitHubPrefix+"/secrets", h.fetchSecrets)
+	r.Head(GitHubPrefix+"/push-provenance", h.preflightGitHubPushAttestation)
+	r.Post(GitHubPrefix+"/push-provenance", h.attestGitHubPushes)
 }
 
 func (h *PublicHandler) logAccessDenied(actorType, actorID, reason string, extra map[string]any) {
@@ -78,20 +80,62 @@ func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
 	slog.Info("OIDC token validated",
 		"repository", claims.Repository,
 		"ref", claims.Ref,
+		"sha", claims.SHA,
 		"actor", claims.Actor,
+		"actor_id", claims.ActorID,
 		"workflow", claims.Workflow,
 		"environment", claims.Environment,
 	)
 
-	policyIDs, err := h.db.MatchingPolicyIDs(r.Context(), claims.Repository, claims.Ref, claims.Actor, claims.Environment)
+	actor := claims.Actor
+	actorID := claims.ActorID
+	identitySource := "github_oidc"
+	provenance, err := h.db.FindGitHubPushProvenance(
+		r.Context(),
+		claims.Repository,
+		claims.Ref,
+		claims.SHA,
+	)
+	if err != nil {
+		slog.Error("failed to resolve Agent Host push provenance", "error", err)
+		h.logAccessDenied("github_actions", claims.ActorID, "provenance_lookup_error", map[string]any{
+			"repository":    claims.Repository,
+			"ref":           claims.Ref,
+			"sha":           claims.SHA,
+			"oidc_actor":    claims.Actor,
+			"oidc_actor_id": claims.ActorID,
+			"error":         err.Error(),
+		})
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+	if provenance != nil {
+		actor = provenance.GitHubLogin
+		actorID = provenance.GitHubUserID
+		identitySource = "agent_host_push"
+	}
+
+	policyIDs, err := h.db.MatchingPolicyIDsForIdentity(
+		r.Context(),
+		claims.Repository,
+		claims.Ref,
+		actor,
+		actorID,
+		claims.Environment,
+	)
 	if err != nil {
 		slog.Error("failed to match policies", "error", err)
-		h.logAccessDenied("github_actions", claims.Repository, "policy_lookup_error", map[string]any{
-			"repository": claims.Repository,
-			"ref":        claims.Ref,
-			"actor":      claims.Actor,
-			"workflow":   claims.Workflow,
-			"error":      err.Error(),
+		h.logAccessDenied("github_actions", actorID, "policy_lookup_error", map[string]any{
+			"repository":      claims.Repository,
+			"ref":             claims.Ref,
+			"sha":             claims.SHA,
+			"actor":           actor,
+			"actor_id":        actorID,
+			"identity_source": identitySource,
+			"oidc_actor":      claims.Actor,
+			"oidc_actor_id":   claims.ActorID,
+			"workflow":        claims.Workflow,
+			"error":           err.Error(),
 		})
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
@@ -102,11 +146,16 @@ func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
 			"repository", claims.Repository,
 			"ref", claims.Ref,
 		)
-		h.logAccessDenied("github_actions", claims.Repository, "no_matching_policies", map[string]any{
-			"repository": claims.Repository,
-			"ref":        claims.Ref,
-			"actor":      claims.Actor,
-			"workflow":   claims.Workflow,
+		h.logAccessDenied("github_actions", actorID, "no_matching_policies", map[string]any{
+			"repository":      claims.Repository,
+			"ref":             claims.Ref,
+			"sha":             claims.SHA,
+			"actor":           actor,
+			"actor_id":        actorID,
+			"identity_source": identitySource,
+			"oidc_actor":      claims.Actor,
+			"oidc_actor_id":   claims.ActorID,
+			"workflow":        claims.Workflow,
 		})
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte("{}"))
@@ -116,27 +165,37 @@ func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
 	secrets, err := h.db.AuthorizedSecrets(r.Context(), policyIDs)
 	if err != nil {
 		slog.Error("failed to load authorized secrets", "error", err)
-		h.logAccessDenied("github_actions", claims.Repository, "secret_retrieval_error", map[string]any{
-			"repository": claims.Repository,
-			"ref":        claims.Ref,
-			"actor":      claims.Actor,
-			"workflow":   claims.Workflow,
-			"error":      err.Error(),
+		h.logAccessDenied("github_actions", actorID, "secret_retrieval_error", map[string]any{
+			"repository":      claims.Repository,
+			"ref":             claims.Ref,
+			"sha":             claims.SHA,
+			"actor":           actor,
+			"actor_id":        actorID,
+			"identity_source": identitySource,
+			"oidc_actor":      claims.Actor,
+			"oidc_actor_id":   claims.ActorID,
+			"workflow":        claims.Workflow,
+			"error":           err.Error(),
 		})
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
 	}
 
 	details, _ := json.Marshal(map[string]any{
-		"repository":    claims.Repository,
-		"ref":           claims.Ref,
-		"actor":         claims.Actor,
-		"workflow":      claims.Workflow,
-		"environment":   claims.Environment,
-		"policies":      policyIDs,
-		"secrets_count": len(secrets),
+		"repository":      claims.Repository,
+		"ref":             claims.Ref,
+		"sha":             claims.SHA,
+		"actor":           actor,
+		"actor_id":        actorID,
+		"identity_source": identitySource,
+		"oidc_actor":      claims.Actor,
+		"oidc_actor_id":   claims.ActorID,
+		"workflow":        claims.Workflow,
+		"environment":     claims.Environment,
+		"policies":        policyIDs,
+		"secrets_count":   len(secrets),
 	})
-	if err := h.audit.CreateEntry("secret.access.granted", "github_actions", claims.Repository, "secret", "", string(details)); err != nil {
+	if err := h.audit.CreateEntry("secret.access.granted", "github_actions", actorID, "secret", "", string(details)); err != nil {
 		slog.Error("audit log failed", "error", err)
 	}
 

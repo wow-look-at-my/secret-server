@@ -50,6 +50,15 @@
         <div class="hint">Optionally also bind a reusable policy: the token vends the <strong>union</strong> of the secrets checked above and the secrets that policy is attached to. Leave as &ldquo;No policy&rdquo; to grant only the direct attachments. The policy's repo/ref/actor patterns are not consulted for a machine token. <a href="{{prefix}}/policies">Manage policies</a>.</div>
     </div>
 
+    <div class="form-group">
+        <label class="check">
+            <input type="checkbox" name="can_attest_github_pushes"
+                {{if .IsNew}}{{if .Form}}{{if index .Form "can_attest_github_pushes"}}checked{{end}}{{end}}{{else}}{{if .Token.CanAttestGitHubPushes}}checked{{end}}{{end}}>
+            Allow this token to attest Agent Host GitHub pushes
+        </label>
+        <div class="hint">High-trust capability for the Agent Host control plane. It may bind a GitHub repository, ref, and commit SHA to the signed-in human user. Never enable this for tokens supplied to jobs, hooks, or agent containers.</div>
+    </div>
+
     <div class="actions">
         <button type="submit" class="btn btn-primary">{{if .IsNew}}Create{{else}}Save{{end}}</button>
         <a href="{{prefix}}/machine-tokens" class="btn">Cancel</a>

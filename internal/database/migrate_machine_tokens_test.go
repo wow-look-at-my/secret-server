@@ -75,6 +75,8 @@ func TestMigrateMachineTokensDropsPolicyColumn(t *testing.T) {
 	assert.Equal(t, "old-token", got.Name)
 	require.NotNil(t, got.PolicyID)
 	assert.Equal(t, "pol1", *got.PolicyID, "the legacy policy binding is preserved")
+	assert.False(t, got.CanAttestGitHubPushes,
+		"upgrades must not grant the new high-trust capability to existing tokens")
 
 	// The preserved policy binding still vends: attach a secret to pol1 and the
 	// token sees it through the union resolution.
@@ -104,6 +106,12 @@ func TestMigrateMachineTokensIdempotent(t *testing.T) {
 	notNull, _, err := db.columnNotNull("machine_tokens", "policy_id")
 	require.Nil(t, err)
 	assert.False(t, notNull, "a fresh DB's policy_id is nullable")
+	has, err = db.columnExists("machine_tokens", "can_attest_github_pushes")
+	require.NoError(t, err)
+	assert.True(t, has)
+	has, err = db.tableExists("github_push_provenance")
+	require.NoError(t, err)
+	assert.True(t, has)
 
 	require.Nil(t, db.migrate(), "migrate must be safe to re-run")
 }

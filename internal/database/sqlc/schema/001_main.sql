@@ -82,6 +82,8 @@ CREATE TABLE IF NOT EXISTS machine_tokens (
     token_hash   TEXT NOT NULL UNIQUE,
     token_prefix TEXT NOT NULL DEFAULT '',
     policy_id    TEXT REFERENCES access_policies(id) ON DELETE SET NULL,
+    can_attest_github_pushes INTEGER NOT NULL DEFAULT 0
+        CHECK (can_attest_github_pushes IN (0, 1)),
     created_at   DATETIME NOT NULL DEFAULT (datetime('now')),
     last_used_at DATETIME
 );
@@ -99,3 +101,20 @@ CREATE TABLE IF NOT EXISTS machine_token_nodes (
 );
 
 CREATE INDEX IF NOT EXISTS idx_machine_token_nodes_node ON machine_token_nodes(node_id);
+
+-- Human provenance for Git smart-HTTP pushes brokered by Agent Host. GitHub
+-- Actions joins the signed repository/ref/SHA claims in its OIDC token to this
+-- table instead of assuming a GitHub App workflow actor is the human pusher.
+CREATE TABLE IF NOT EXISTS github_push_provenance (
+    repository       TEXT NOT NULL COLLATE NOCASE,
+    ref              TEXT NOT NULL,
+    sha              TEXT NOT NULL COLLATE NOCASE,
+    github_user_id   TEXT NOT NULL,
+    github_login     TEXT NOT NULL,
+    machine_token_id TEXT NOT NULL,
+    attested_at      DATETIME NOT NULL,
+    PRIMARY KEY (repository, ref, sha)
+);
+
+CREATE INDEX IF NOT EXISTS idx_github_push_provenance_user
+    ON github_push_provenance(github_user_id);
