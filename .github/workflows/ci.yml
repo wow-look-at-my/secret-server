@@ -9,6 +9,9 @@ permissions:
   id-token: write
   actions: read
   checks: read
+  # go-toolchain autorelease registers the publish and its stored artifacts.
+  deployments: write
+  artifact-metadata: write
 
 jobs:
   build:
