@@ -147,6 +147,7 @@ func (h *UIHandler) createMachineToken(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(r.FormValue("name"))
 	nodeIDs := r.Form["node_ids"]
 	policyID := formPolicyID(r)
+	canAttest := r.FormValue("can_attest_github_pushes") == "on"
 
 	renderErr := func(msg string) {
 		h.renderTokenForm(w, r, map[string]any{"IsNew": true, "Error": msg, "Form": r.Form},
@@ -170,8 +171,18 @@ func (h *UIHandler) createMachineToken(w http.ResponseWriter, r *http.Request) {
 		renderErr("Failed to create machine token. Check server logs for details.")
 		return
 	}
+	if err := h.db.SetMachineTokenGitHubAttestation(r.Context(), rec.ID, canAttest); err != nil {
+		_ = h.db.DeleteMachineToken(rec.ID)
+		slog.Error("set machine token GitHub attestation permission failed", "error", err)
+		renderErr("Failed to create machine token. Check server logs for details.")
+		return
+	}
 
-	details, _ := json.Marshal(map[string]any{"name": name, "policy_id": derefString(policyID), "node_count": len(nodeIDs)})
+	details, _ := json.Marshal(map[string]any{
+		"name": name, "policy_id": derefString(policyID),
+		"node_count":               len(nodeIDs),
+		"can_attest_github_pushes": canAttest,
+	})
 	if err := h.audit.CreateEntry("machine_token.create", "admin", uiActor(r), "machine_token", rec.ID, string(details)); err != nil {
 		slog.Error("audit log failed", "error", err)
 	}
@@ -217,6 +228,7 @@ func (h *UIHandler) updateMachineTokenForm(w http.ResponseWriter, r *http.Reques
 	}
 	nodeIDs := r.Form["node_ids"]
 	policyID := formPolicyID(r)
+	canAttest := r.FormValue("can_attest_github_pushes") == "on"
 
 	tok, err := h.db.GetMachineToken(id)
 	if err != nil {
@@ -236,7 +248,12 @@ func (h *UIHandler) updateMachineTokenForm(w http.ResponseWriter, r *http.Reques
 
 	// Clearing all attachments is allowed — the token then vends nothing until
 	// secrets and/or a policy are added again.
-	if err := h.db.UpdateMachineToken(id, policyID, nodeIDs); err != nil {
+	if err := h.db.UpdateMachineTokenWithGitHubAttestation(
+		id,
+		policyID,
+		nodeIDs,
+		canAttest,
+	); err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			renderErr("The selected policy or secret no longer exists. Reload and try again.")
 			return
@@ -245,8 +262,10 @@ func (h *UIHandler) updateMachineTokenForm(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-
-	details, _ := json.Marshal(map[string]any{"policy_id": derefString(policyID), "node_count": len(nodeIDs)})
+	details, _ := json.Marshal(map[string]any{
+		"policy_id": derefString(policyID), "node_count": len(nodeIDs),
+		"can_attest_github_pushes": canAttest,
+	})
 	if err := h.audit.CreateEntry("machine_token.update", "admin", uiActor(r), "machine_token", id, string(details)); err != nil {
 		slog.Error("audit log failed", "error", err)
 	}
