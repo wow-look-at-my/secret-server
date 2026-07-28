@@ -89,10 +89,14 @@ func TestValidateTokenRequiresImmutableActorID(t *testing.T) {
 		Expiry:    jwt.NewNumericDate(time.Now().Add(time.Hour)),
 		NotBefore: jwt.NewNumericDate(time.Now().Add(-time.Minute)),
 	}
-	customClaims := map[string]string{
-		"repository": "myorg/myrepo",
-		"ref":        "refs/heads/main",
-		"actor":      "octocat",
+	customClaims := struct {
+		Repository string `json:"repository"`
+		Ref        string `json:"ref"`
+		Actor      string `json:"actor"`
+	}{
+		Repository: "myorg/myrepo",
+		Ref:        "refs/heads/main",
+		Actor:      "octocat",
 	}
 	token, err := jwt.Signed(signer).Claims(stdClaims).Claims(customClaims).Serialize()
 	require.NoError(t, err)
