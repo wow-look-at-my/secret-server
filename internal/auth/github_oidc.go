@@ -22,6 +22,7 @@ type GitHubClaims struct {
 	Repository      string `json:"repository"`
 	RepositoryOwner string `json:"repository_owner"`
 	Actor           string `json:"actor"`
+	ActorID         string `json:"actor_id"`
 	Workflow        string `json:"workflow"`
 	Ref             string `json:"ref"`
 	Environment     string `json:"environment"`
@@ -85,6 +86,10 @@ func (v *GitHubOIDCValidator) ValidateToken(ctx context.Context, tokenString str
 	}
 	if err := stdClaims.Validate(expected); err != nil {
 		return nil, fmt.Errorf("validate standard claims: %w", err)
+	}
+	if customClaims.Repository == "" || customClaims.Ref == "" ||
+		customClaims.Actor == "" || customClaims.ActorID == "" {
+		return nil, fmt.Errorf("validate GitHub claims: repository, ref, actor, and actor_id are required")
 	}
 
 	customClaims.Subject = stdClaims.Subject

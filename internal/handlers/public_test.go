@@ -73,7 +73,9 @@ func TestPublicFetchSecretsWithPolicy(t *testing.T) {
 	require.Equal(t, 1, len(entries))
 	assert.Equal(t, "secret.access.granted", entries[0].Action)
 	assert.Equal(t, "github_actions", entries[0].ActorType)
-	assert.Equal(t, "myorg/repo", entries[0].ActorID)
+	assert.Equal(t, "583231", entries[0].ActorID)
+	assert.Contains(t, entries[0].Details, `"actor":"deploy-bot"`)
+	assert.Contains(t, entries[0].Details, `"actor_id":"583231"`)
 }
 
 func TestPublicFetchSecretsNoMatchingPolicy(t *testing.T) {
@@ -99,7 +101,7 @@ func TestPublicFetchSecretsNoMatchingPolicy(t *testing.T) {
 	require.Equal(t, 1, len(entries))
 	assert.Equal(t, "secret.access.denied", entries[0].Action)
 	assert.Equal(t, "github_actions", entries[0].ActorType)
-	assert.Equal(t, "myorg/repo", entries[0].ActorID)
+	assert.Equal(t, "583231", entries[0].ActorID)
 	assert.Contains(t, entries[0].Details, `"reason":"no_matching_policies"`)
 	assert.Contains(t, entries[0].Details, `"repository":"myorg/repo"`)
 }
@@ -176,7 +178,7 @@ func TestPublicFetchSecretsPolicyDBError(t *testing.T) {
 	require.Equal(t, 1, len(entries))
 	assert.Equal(t, "secret.access.denied", entries[0].Action)
 	assert.Equal(t, "github_actions", entries[0].ActorType)
-	assert.Equal(t, "myorg/repo", entries[0].ActorID)
+	assert.Equal(t, "583231", entries[0].ActorID)
 	assert.Contains(t, entries[0].Details, `"reason":"policy_lookup_error"`)
 }
 

@@ -35,12 +35,16 @@ func TestValidateTokenValid(t *testing.T) {
 	customClaims := struct {
 		Repository      string `json:"repository"`
 		RepositoryOwner string `json:"repository_owner"`
+		Actor           string `json:"actor"`
+		ActorID         string `json:"actor_id"`
 		Workflow        string `json:"workflow"`
 		Ref             string `json:"ref"`
 		Environment     string `json:"environment"`
 	}{
 		Repository:      "myorg/myrepo",
 		RepositoryOwner: "myorg",
+		Actor:           "octocat",
+		ActorID:         "583231",
 		Workflow:        "deploy",
 		Ref:             "refs/heads/main",
 		Environment:     "production",
@@ -60,11 +64,46 @@ func TestValidateTokenValid(t *testing.T) {
 	assert.Equal(t, "myorg/myrepo", claims.Repository)
 
 	assert.Equal(t, "myorg", claims.RepositoryOwner)
+	assert.Equal(t, "octocat", claims.Actor)
+	assert.Equal(t, "583231", claims.ActorID)
 
 	assert.Equal(t, "refs/heads/main", claims.Ref)
 
 	assert.Equal(t, "repo:myorg/myrepo:ref:refs/heads/main", claims.Subject)
 
+}
+
+func TestValidateTokenRequiresImmutableActorID(t *testing.T) {
+	key, _ := rsa.GenerateKey(rand.Reader, 2048)
+	jwk := jose.JSONWebKey{Key: key, KeyID: "kid-actor", Algorithm: "RS256"}
+	pubJWK := jose.JSONWebKey{Key: &key.PublicKey, KeyID: "kid-actor", Algorithm: "RS256"}
+	signer, err := jose.NewSigner(
+		jose.SigningKey{Algorithm: jose.RS256, Key: jwk},
+		(&jose.SignerOptions{}).WithType("JWT"),
+	)
+	require.NoError(t, err)
+	stdClaims := jwt.Claims{
+		Issuer:    "https://token.actions.githubusercontent.com",
+		Subject:   "repo:myorg/myrepo:ref:refs/heads/main",
+		Audience:  jwt.Audience{"aud"},
+		Expiry:    jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		NotBefore: jwt.NewNumericDate(time.Now().Add(-time.Minute)),
+	}
+	customClaims := map[string]string{
+		"repository": "myorg/myrepo",
+		"ref":        "refs/heads/main",
+		"actor":      "octocat",
+	}
+	token, err := jwt.Signed(signer).Claims(stdClaims).Claims(customClaims).Serialize()
+	require.NoError(t, err)
+
+	v := NewGitHubOIDCValidator("aud")
+	v.jwks = &jose.JSONWebKeySet{Keys: []jose.JSONWebKey{pubJWK}}
+	v.fetched = time.Now()
+	v.jwksURL = "cached"
+
+	_, err = v.ValidateToken(context.Background(), token)
+	require.ErrorContains(t, err, "actor_id")
 }
 
 func TestValidateTokenExpired(t *testing.T) {

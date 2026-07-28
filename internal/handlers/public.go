@@ -79,16 +79,18 @@ func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
 		"repository", claims.Repository,
 		"ref", claims.Ref,
 		"actor", claims.Actor,
+		"actor_id", claims.ActorID,
 		"workflow", claims.Workflow,
 	)
 
 	policyIDs, err := h.db.MatchingPolicyIDs(r.Context(), claims.Repository, claims.Ref, claims.Actor)
 	if err != nil {
 		slog.Error("failed to match policies", "error", err)
-		h.logAccessDenied("github_actions", claims.Repository, "policy_lookup_error", map[string]any{
+		h.logAccessDenied("github_actions", claims.ActorID, "policy_lookup_error", map[string]any{
 			"repository": claims.Repository,
 			"ref":        claims.Ref,
 			"actor":      claims.Actor,
+			"actor_id":   claims.ActorID,
 			"workflow":   claims.Workflow,
 			"error":      err.Error(),
 		})
@@ -101,10 +103,11 @@ func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
 			"repository", claims.Repository,
 			"ref", claims.Ref,
 		)
-		h.logAccessDenied("github_actions", claims.Repository, "no_matching_policies", map[string]any{
+		h.logAccessDenied("github_actions", claims.ActorID, "no_matching_policies", map[string]any{
 			"repository": claims.Repository,
 			"ref":        claims.Ref,
 			"actor":      claims.Actor,
+			"actor_id":   claims.ActorID,
 			"workflow":   claims.Workflow,
 		})
 		w.Header().Set("Content-Type", "application/json")
@@ -115,10 +118,11 @@ func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
 	secrets, err := h.db.AuthorizedSecrets(r.Context(), policyIDs)
 	if err != nil {
 		slog.Error("failed to load authorized secrets", "error", err)
-		h.logAccessDenied("github_actions", claims.Repository, "secret_retrieval_error", map[string]any{
+		h.logAccessDenied("github_actions", claims.ActorID, "secret_retrieval_error", map[string]any{
 			"repository": claims.Repository,
 			"ref":        claims.Ref,
 			"actor":      claims.Actor,
+			"actor_id":   claims.ActorID,
 			"workflow":   claims.Workflow,
 			"error":      err.Error(),
 		})
@@ -130,11 +134,12 @@ func (h *PublicHandler) fetchSecrets(w http.ResponseWriter, r *http.Request) {
 		"repository":    claims.Repository,
 		"ref":           claims.Ref,
 		"actor":         claims.Actor,
+		"actor_id":      claims.ActorID,
 		"workflow":      claims.Workflow,
 		"policies":      policyIDs,
 		"secrets_count": len(secrets),
 	})
-	if err := h.audit.CreateEntry("secret.access.granted", "github_actions", claims.Repository, "secret", "", string(details)); err != nil {
+	if err := h.audit.CreateEntry("secret.access.granted", "github_actions", claims.ActorID, "secret", "", string(details)); err != nil {
 		slog.Error("audit log failed", "error", err)
 	}
 
