@@ -493,7 +493,13 @@ JOIN policy_patterns pf ON pf.policy_id = p.id AND pf.kind = 'ref'
 JOIN policy_patterns pa ON pa.policy_id = p.id AND pa.kind = 'actor'
 WHERE ? GLOB replace(pr.pattern, '[', '[[]')
   AND ? GLOB replace(pf.pattern, '[', '[[]')
-  AND ? GLOB replace(pa.pattern, '[', '[[]')
+  AND (
+    ? GLOB replace(pa.pattern, '[', '[[]')
+    OR (
+      ? != ''
+      AND ('id:' || ?) GLOB replace(pa.pattern, '[', '[[]')
+    )
+  )
 `
 
 // MatchingPolicyIDs returns every policy whose pattern rows all match the
@@ -504,7 +510,26 @@ WHERE ? GLOB replace(pr.pattern, '[', '[[]')
 // inside SQLite via its native GLOB operator; no rows cross the SQL boundary
 // other than the matching IDs.
 func (d *DB) MatchingPolicyIDs(ctx context.Context, repository, ref, actor string) ([]string, error) {
-	rows, err := d.db.QueryContext(ctx, matchingPolicyIDsSQL, repository, ref, actor)
+	return d.MatchingPolicyIDsForIdentity(ctx, repository, ref, actor, "")
+}
+
+// MatchingPolicyIDsForIdentity also permits an actor pattern in the explicit
+// form "id:<numeric GitHub user ID>". Login patterns remain compatible, while
+// stable-ID policies survive account renames and can consume Agent Host push
+// provenance without trusting an editable commit author.
+func (d *DB) MatchingPolicyIDsForIdentity(
+	ctx context.Context,
+	repository, ref, actor, actorID string,
+) ([]string, error) {
+	rows, err := d.db.QueryContext(
+		ctx,
+		matchingPolicyIDsSQL,
+		repository,
+		ref,
+		actor,
+		actorID,
+		actorID,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("query matching policies: %w", err)
 	}
