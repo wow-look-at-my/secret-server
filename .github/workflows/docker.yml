@@ -28,7 +28,6 @@ jobs:
         with:
           images: ghcr.io/wow-look-at-my/secret-server
           tags: |
-            type=sha
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Create Dockerfile
@@ -61,4 +60,11 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           secrets: |
-            "github_token=${{ secrets.PRIVATE_ORG_REPO_READ }}"
+            "github_token=${{ secrets.GITHUB_TOKEN }}"
+
+      - uses: actions/delete-package-versions@v5
+        with:
+          package-name: secret-server
+          package-type: container
+          min-versions-to-keep: 5
+          delete-only-untagged-versions: true
