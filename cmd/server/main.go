@@ -35,7 +35,7 @@ func uiSecurityHeaders(next http.Handler) http.Handler {
 	csp := strings.Join([]string{
 		"default-src 'none'",
 		"script-src 'unsafe-inline'",
-		"style-src 'unsafe-inline'",
+		"style-src 'self' 'unsafe-inline'",
 		"frame-ancestors 'none'",
 	}, "; ")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -134,6 +134,9 @@ func buildMux(db *database.DB, auditDB *database.AuditDB, cfg *config.Config) (c
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	})
+
+	// Public llms.txt guide for LLMs/agents — like /health, not behind CF Access
+	handlers.RegisterLlms(r)
 
 	// Admin API — behind CF Access (no CSRF — JSON API)
 	adminHandler := handlers.NewAdminHandler(db, auditDB)

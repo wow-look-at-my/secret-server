@@ -11,6 +11,57 @@ import (
 	"time"
 )
 
+const addPolicyPrecedence = `-- name: AddPolicyPrecedence :exec
+INSERT INTO policy_precedence (node_id, policy_id, depends_on_id) VALUES (?, ?, ?)
+`
+
+type AddPolicyPrecedenceParams struct {
+	NodeID      string
+	PolicyID    string
+	DependsOnID string
+}
+
+func (q *Queries) AddPolicyPrecedence(ctx context.Context, arg AddPolicyPrecedenceParams) error {
+	_, err := q.db.ExecContext(ctx, addPolicyPrecedence, arg.NodeID, arg.PolicyID, arg.DependsOnID)
+	return err
+}
+
+const attachNodePolicy = `-- name: AttachNodePolicy :exec
+INSERT INTO secret_node_policies (node_id, policy_id) VALUES (?, ?)
+`
+
+type AttachNodePolicyParams struct {
+	NodeID   string
+	PolicyID string
+}
+
+func (q *Queries) AttachNodePolicy(ctx context.Context, arg AttachNodePolicyParams) error {
+	_, err := q.db.ExecContext(ctx, attachNodePolicy, arg.NodeID, arg.PolicyID)
+	return err
+}
+
+const countAttachedPoliciesForNode = `-- name: CountAttachedPoliciesForNode :one
+SELECT COUNT(*) FROM secret_node_policies WHERE node_id = ?
+`
+
+func (q *Queries) CountAttachedPoliciesForNode(ctx context.Context, nodeID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countAttachedPoliciesForNode, nodeID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countNodesReferencingPolicy = `-- name: CountNodesReferencingPolicy :one
+SELECT COUNT(*) FROM secret_node_policies WHERE policy_id = ?
+`
+
+func (q *Queries) CountNodesReferencingPolicy(ctx context.Context, policyID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countNodesReferencingPolicy, policyID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countPolicies = `-- name: CountPolicies :one
 SELECT COUNT(*) FROM access_policies
 `
@@ -23,28 +74,17 @@ func (q *Queries) CountPolicies(ctx context.Context) (int64, error) {
 }
 
 const createPolicy = `-- name: CreatePolicy :exec
-INSERT INTO access_policies (id, name, repository_pattern, ref_pattern, environment_id, created_at)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO access_policies (id, name, created_at) VALUES (?, ?, ?)
 `
 
 type CreatePolicyParams struct {
-	ID                string
-	Name              string
-	RepositoryPattern string
-	RefPattern        string
-	EnvironmentID     string
-	CreatedAt         time.Time
+	ID        string
+	Name      string
+	CreatedAt time.Time
 }
 
 func (q *Queries) CreatePolicy(ctx context.Context, arg CreatePolicyParams) error {
-	_, err := q.db.ExecContext(ctx, createPolicy,
-		arg.ID,
-		arg.Name,
-		arg.RepositoryPattern,
-		arg.RefPattern,
-		arg.EnvironmentID,
-		arg.CreatedAt,
-	)
+	_, err := q.db.ExecContext(ctx, createPolicy, arg.ID, arg.Name, arg.CreatedAt)
 	return err
 }
 
@@ -56,76 +96,115 @@ func (q *Queries) DeletePolicy(ctx context.Context, id string) (sql.Result, erro
 	return q.db.ExecContext(ctx, deletePolicy, id)
 }
 
-const getPolicy = `-- name: GetPolicy :one
-SELECT p.id, p.name, p.repository_pattern, p.ref_pattern, p.environment_id, e.project, e.environment, p.created_at
-FROM access_policies p
-JOIN environments e ON e.id = p.environment_id
-WHERE p.id = ?
+const detachNodePolicy = `-- name: DetachNodePolicy :execresult
+DELETE FROM secret_node_policies WHERE node_id = ? AND policy_id = ?
 `
 
-type GetPolicyRow struct {
-	ID                string
-	Name              string
-	RepositoryPattern string
-	RefPattern        string
-	EnvironmentID     string
-	Project           string
-	Environment       string
-	CreatedAt         time.Time
+type DetachNodePolicyParams struct {
+	NodeID   string
+	PolicyID string
 }
 
-func (q *Queries) GetPolicy(ctx context.Context, id string) (GetPolicyRow, error) {
+func (q *Queries) DetachNodePolicy(ctx context.Context, arg DetachNodePolicyParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, detachNodePolicy, arg.NodeID, arg.PolicyID)
+}
+
+const getPolicy = `-- name: GetPolicy :one
+SELECT id, name, created_at FROM access_policies WHERE id = ?
+`
+
+func (q *Queries) GetPolicy(ctx context.Context, id string) (AccessPolicy, error) {
 	row := q.db.QueryRowContext(ctx, getPolicy, id)
-	var i GetPolicyRow
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.RepositoryPattern,
-		&i.RefPattern,
-		&i.EnvironmentID,
-		&i.Project,
-		&i.Environment,
-		&i.CreatedAt,
-	)
+	var i AccessPolicy
+	err := row.Scan(&i.ID, &i.Name, &i.CreatedAt)
 	return i, err
 }
 
-const listPolicies = `-- name: ListPolicies :many
-SELECT p.id, p.name, p.repository_pattern, p.ref_pattern, p.environment_id, e.project, e.environment, p.created_at
-FROM access_policies p
-JOIN environments e ON e.id = p.environment_id
+const listNodePolicies = `-- name: ListNodePolicies :many
+SELECT p.id, p.name, p.created_at
+FROM secret_node_policies snp
+JOIN access_policies p ON p.id = snp.policy_id
+WHERE snp.node_id = ?
 ORDER BY p.name
 `
 
-type ListPoliciesRow struct {
-	ID                string
-	Name              string
-	RepositoryPattern string
-	RefPattern        string
-	EnvironmentID     string
-	Project           string
-	Environment       string
-	CreatedAt         time.Time
-}
-
-func (q *Queries) ListPolicies(ctx context.Context) ([]ListPoliciesRow, error) {
-	rows, err := q.db.QueryContext(ctx, listPolicies)
+func (q *Queries) ListNodePolicies(ctx context.Context, nodeID string) ([]AccessPolicy, error) {
+	rows, err := q.db.QueryContext(ctx, listNodePolicies, nodeID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListPoliciesRow
+	var items []AccessPolicy
 	for rows.Next() {
-		var i ListPoliciesRow
+		var i AccessPolicy
+		if err := rows.Scan(&i.ID, &i.Name, &i.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNodePolicyPrecedence = `-- name: ListNodePolicyPrecedence :many
+SELECT node_id, policy_id, depends_on_id
+FROM policy_precedence
+WHERE node_id = ?
+`
+
+func (q *Queries) ListNodePolicyPrecedence(ctx context.Context, nodeID string) ([]PolicyPrecedence, error) {
+	rows, err := q.db.QueryContext(ctx, listNodePolicyPrecedence, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []PolicyPrecedence
+	for rows.Next() {
+		var i PolicyPrecedence
+		if err := rows.Scan(&i.NodeID, &i.PolicyID, &i.DependsOnID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNodesReferencingPolicy = `-- name: ListNodesReferencingPolicy :many
+SELECT sn.id, sn.kind, sn.parent_id, sn.name, sn.value, sn.created_at, sn.updated_at
+FROM secret_node_policies snp
+JOIN secret_nodes sn ON sn.id = snp.node_id
+WHERE snp.policy_id = ?
+ORDER BY sn.name
+`
+
+func (q *Queries) ListNodesReferencingPolicy(ctx context.Context, policyID string) ([]SecretNode, error) {
+	rows, err := q.db.QueryContext(ctx, listNodesReferencingPolicy, policyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SecretNode
+	for rows.Next() {
+		var i SecretNode
 		if err := rows.Scan(
 			&i.ID,
+			&i.Kind,
+			&i.ParentID,
 			&i.Name,
-			&i.RepositoryPattern,
-			&i.RefPattern,
-			&i.EnvironmentID,
-			&i.Project,
-			&i.Environment,
+			&i.Value,
 			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -140,25 +219,57 @@ func (q *Queries) ListPolicies(ctx context.Context) ([]ListPoliciesRow, error) {
 	return items, nil
 }
 
-const updatePolicy = `-- name: UpdatePolicy :execresult
-UPDATE access_policies SET name = ?, repository_pattern = ?, ref_pattern = ?, environment_id = ?
-WHERE id = ?
+const listPolicies = `-- name: ListPolicies :many
+SELECT id, name, created_at FROM access_policies ORDER BY name
 `
 
-type UpdatePolicyParams struct {
-	Name              string
-	RepositoryPattern string
-	RefPattern        string
-	EnvironmentID     string
-	ID                string
+func (q *Queries) ListPolicies(ctx context.Context) ([]AccessPolicy, error) {
+	rows, err := q.db.QueryContext(ctx, listPolicies)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AccessPolicy
+	for rows.Next() {
+		var i AccessPolicy
+		if err := rows.Scan(&i.ID, &i.Name, &i.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
-func (q *Queries) UpdatePolicy(ctx context.Context, arg UpdatePolicyParams) (sql.Result, error) {
-	return q.db.ExecContext(ctx, updatePolicy,
-		arg.Name,
-		arg.RepositoryPattern,
-		arg.RefPattern,
-		arg.EnvironmentID,
-		arg.ID,
-	)
+const removePolicyPrecedence = `-- name: RemovePolicyPrecedence :execresult
+DELETE FROM policy_precedence
+WHERE node_id = ? AND policy_id = ? AND depends_on_id = ?
+`
+
+type RemovePolicyPrecedenceParams struct {
+	NodeID      string
+	PolicyID    string
+	DependsOnID string
+}
+
+func (q *Queries) RemovePolicyPrecedence(ctx context.Context, arg RemovePolicyPrecedenceParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, removePolicyPrecedence, arg.NodeID, arg.PolicyID, arg.DependsOnID)
+}
+
+const updatePolicyName = `-- name: UpdatePolicyName :execresult
+UPDATE access_policies SET name = ? WHERE id = ?
+`
+
+type UpdatePolicyNameParams struct {
+	Name string
+	ID   string
+}
+
+func (q *Queries) UpdatePolicyName(ctx context.Context, arg UpdatePolicyNameParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, updatePolicyName, arg.Name, arg.ID)
 }

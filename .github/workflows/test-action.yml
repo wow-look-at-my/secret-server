@@ -11,11 +11,9 @@ jobs:
   test-action:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-
       - name: Fetch secrets
         id: fetch
-        uses: ./
+        uses: wow-look-at-my/actions@secret-server#latest
 
       - name: Verify secrets output
         env:

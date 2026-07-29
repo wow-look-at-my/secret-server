@@ -1,0 +1,89 @@
+# secret-server
+
+> Self-hosted secrets manager: a single Go binary with SQLite storage. Secrets
+> are AES-256-GCM encrypted at rest and vended read-only through one public
+> endpoint to GitHub Actions workflows (OIDC) and machine-token clients.
+> Everything else (management API + web UI) is human-only behind Cloudflare
+> Access.
+
+## Fetching secrets (the only public API)
+
+    GET {{BASE_URL}}/github/v1/secrets
+    Authorization: Bearer <credential>
+
+The bearer credential is one of:
+
+- A GitHub Actions OIDC JWT (requested by the workflow via its identity token
+  endpoint).
+- A machine token (prefix `sst_`) issued by an admin, for clients that cannot
+  present an OIDC JWT. The `sst_` prefix alone selects the validation path;
+  both credential types share this one route.
+
+The response is a flat JSON object mapping secret name to plaintext value.
+Secret names are globally unique server-wide, so there is no nesting and no
+collision handling:
+
+    {"DB_URL": "postgres://...", "API_KEY": "..."}
+
+A valid credential that is authorized for no secrets gets `{}` (HTTP 200).
+A missing or invalid credential gets HTTP 401 with `{"error": "..."}`.
+
+Machine-token example:
+
+    curl -fsSL -H "Authorization: Bearer $SECRET_SERVER_TOKEN" \
+      {{BASE_URL}}/github/v1/secrets
+
+The Agent Host control plane also uses HEAD/POST
+`{{BASE_URL}}/github/v1/push-provenance` with a machine token whose separate
+push-attestation capability is enabled. That route is not for workflows or
+agent containers.
+
+## How access is authorized
+
+- Secrets live in a tree of nodes: `secret` leaves and `group` composites.
+- Access policies are pattern-match rules attached to nodes. Each policy holds
+  SQLite GLOB patterns of three kinds: `repository`, `ref`, and `actor`.
+- An OIDC request matches a policy only if at least one pattern of EACH kind
+  matches the repository, ref, and resolved actor. Actor patterns may target a
+  login or an immutable numeric GitHub account as `id:<number>`. A policy with
+  zero patterns of a kind matches nothing -- fail-closed, no implicit wildcard;
+  write `*` explicitly.
+- For an exact repository/ref/SHA previously attested by Agent Host after a
+  successful push, the resolved actor is the signed-in human. Otherwise it is
+  the actor from GitHub's signed OIDC token. Both are retained in the audit log.
+- A policy attached to a group grants every descendant leaf. Inheritance is
+  additive: a leaf is vended if any matching policy sits on it or an ancestor.
+- A machine token grants secrets by direct attachment to secret-tree nodes
+  and/or via one optional bound policy (the union of both; the policy's
+  repository/ref/actor patterns are never consulted for machine tokens). The
+  token plaintext is shown once at creation and stored only as a SHA-256 hash.
+
+## Using it from GitHub Actions
+
+The composite action wraps the OIDC token request and the export:
+
+    permissions:
+      id-token: write
+
+    jobs:
+      deploy:
+        runs-on: ubuntu-latest
+        steps:
+          - uses: wow-look-at-my/actions@secret-server#latest
+            id: secrets
+
+          # Secrets are exported as masked environment variables
+          - run: echo "Got $DB_URL"
+
+## Admin surface (not for agents)
+
+Everything under {{BASE_URL}}/admin/ (REST API + web UI) manages the secret
+tree, policies, and machine tokens. It sits behind Cloudflare Access and is
+meant for humans; agents should only ever call `/github/v1/secrets`. Every
+secret access -- granted or denied -- is recorded in an audit log.
+
+## More
+
+- Full documentation (configuration, deployment, policy model):
+  https://github.com/wow-look-at-my/secret-server
+- Health check: GET {{BASE_URL}}/health (returns `ok`)

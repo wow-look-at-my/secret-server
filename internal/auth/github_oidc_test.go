@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/go-jose/go-jose/v4"
-	"github.com/wow-look-at-my/testify/assert"
-	"github.com/wow-look-at-my/testify/require"
 	"github.com/go-jose/go-jose/v4/jwt"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestValidateTokenValid(t *testing.T) {
@@ -25,24 +25,30 @@ func TestValidateTokenValid(t *testing.T) {
 	require.Nil(t, err)
 
 	stdClaims := jwt.Claims{
-		Issuer:		"https://token.actions.githubusercontent.com",
-		Subject:	"repo:myorg/myrepo:ref:refs/heads/main",
-		Audience:	jwt.Audience{"https://secrets.example.com"},
-		Expiry:		jwt.NewNumericDate(time.Now().Add(time.Hour)),
-		NotBefore:	jwt.NewNumericDate(time.Now().Add(-time.Minute)),
-		IssuedAt:	jwt.NewNumericDate(time.Now()),
+		Issuer:    "https://token.actions.githubusercontent.com",
+		Subject:   "repo:myorg/myrepo:ref:refs/heads/main",
+		Audience:  jwt.Audience{"https://secrets.example.com"},
+		Expiry:    jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		NotBefore: jwt.NewNumericDate(time.Now().Add(-time.Minute)),
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
 	}
 	customClaims := struct {
 		Repository      string `json:"repository"`
 		RepositoryOwner string `json:"repository_owner"`
+		Actor           string `json:"actor"`
+		ActorID         string `json:"actor_id"`
 		Workflow        string `json:"workflow"`
 		Ref             string `json:"ref"`
+		SHA             string `json:"sha"`
 		Environment     string `json:"environment"`
 	}{
 		Repository:      "myorg/myrepo",
 		RepositoryOwner: "myorg",
+		Actor:           "octocat",
+		ActorID:         "583231",
 		Workflow:        "deploy",
 		Ref:             "refs/heads/main",
+		SHA:             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		Environment:     "production",
 	}
 
@@ -60,11 +66,51 @@ func TestValidateTokenValid(t *testing.T) {
 	assert.Equal(t, "myorg/myrepo", claims.Repository)
 
 	assert.Equal(t, "myorg", claims.RepositoryOwner)
+	assert.Equal(t, "octocat", claims.Actor)
+	assert.Equal(t, "583231", claims.ActorID)
 
 	assert.Equal(t, "refs/heads/main", claims.Ref)
+	assert.Equal(t, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", claims.SHA)
 
 	assert.Equal(t, "repo:myorg/myrepo:ref:refs/heads/main", claims.Subject)
 
+}
+
+func TestValidateTokenRequiresImmutableActorID(t *testing.T) {
+	key, _ := rsa.GenerateKey(rand.Reader, 2048)
+	jwk := jose.JSONWebKey{Key: key, KeyID: "kid-actor", Algorithm: "RS256"}
+	pubJWK := jose.JSONWebKey{Key: &key.PublicKey, KeyID: "kid-actor", Algorithm: "RS256"}
+	signer, err := jose.NewSigner(
+		jose.SigningKey{Algorithm: jose.RS256, Key: jwk},
+		(&jose.SignerOptions{}).WithType("JWT"),
+	)
+	require.NoError(t, err)
+	stdClaims := jwt.Claims{
+		Issuer:    "https://token.actions.githubusercontent.com",
+		Subject:   "repo:myorg/myrepo:ref:refs/heads/main",
+		Audience:  jwt.Audience{"aud"},
+		Expiry:    jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		NotBefore: jwt.NewNumericDate(time.Now().Add(-time.Minute)),
+	}
+	customClaims := struct {
+		Repository string `json:"repository"`
+		Ref        string `json:"ref"`
+		Actor      string `json:"actor"`
+	}{
+		Repository: "myorg/myrepo",
+		Ref:        "refs/heads/main",
+		Actor:      "octocat",
+	}
+	token, err := jwt.Signed(signer).Claims(stdClaims).Claims(customClaims).Serialize()
+	require.NoError(t, err)
+
+	v := NewGitHubOIDCValidator("aud")
+	v.jwks = &jose.JSONWebKeySet{Keys: []jose.JSONWebKey{pubJWK}}
+	v.fetched = time.Now()
+	v.jwksURL = "cached"
+
+	_, err = v.ValidateToken(context.Background(), token)
+	require.ErrorContains(t, err, "actor_id")
 }
 
 func TestValidateTokenExpired(t *testing.T) {
@@ -74,9 +120,9 @@ func TestValidateTokenExpired(t *testing.T) {
 
 	signer, _ := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: jwk}, (&jose.SignerOptions{}).WithType("JWT"))
 	stdClaims := jwt.Claims{
-		Issuer:		"https://token.actions.githubusercontent.com",
-		Audience:	jwt.Audience{"aud"},
-		Expiry:		jwt.NewNumericDate(time.Now().Add(-time.Hour)),
+		Issuer:   "https://token.actions.githubusercontent.com",
+		Audience: jwt.Audience{"aud"},
+		Expiry:   jwt.NewNumericDate(time.Now().Add(-time.Hour)),
 	}
 	token, _ := jwt.Signed(signer).Claims(stdClaims).Serialize()
 
@@ -97,10 +143,10 @@ func TestValidateTokenWrongIssuer(t *testing.T) {
 
 	signer, _ := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: jwk}, (&jose.SignerOptions{}).WithType("JWT"))
 	stdClaims := jwt.Claims{
-		Issuer:		"https://evil.example.com",
-		Audience:	jwt.Audience{"aud"},
-		Expiry:		jwt.NewNumericDate(time.Now().Add(time.Hour)),
-		NotBefore:	jwt.NewNumericDate(time.Now().Add(-time.Minute)),
+		Issuer:    "https://evil.example.com",
+		Audience:  jwt.Audience{"aud"},
+		Expiry:    jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		NotBefore: jwt.NewNumericDate(time.Now().Add(-time.Minute)),
 	}
 	token, _ := jwt.Signed(signer).Claims(stdClaims).Serialize()
 
@@ -123,9 +169,9 @@ func TestValidateTokenNoMatchingKey(t *testing.T) {
 
 	signer, _ := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: jwk}, (&jose.SignerOptions{}).WithType("JWT"))
 	token, _ := jwt.Signed(signer).Claims(jwt.Claims{
-		Issuer:		"https://token.actions.githubusercontent.com",
-		Audience:	jwt.Audience{"aud"},
-		Expiry:		jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		Issuer:   "https://token.actions.githubusercontent.com",
+		Audience: jwt.Audience{"aud"},
+		Expiry:   jwt.NewNumericDate(time.Now().Add(time.Hour)),
 	}).Serialize()
 
 	v := NewGitHubOIDCValidator("aud")

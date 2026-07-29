@@ -2,45 +2,36 @@
 {{define "title"}}Dashboard - Secret Server{{end}}
 
 <h1>Dashboard</h1>
-<p class="page-desc">Overview of all secrets and access policies managed by this server.</p>
+<p class="page-desc">Overview of the secret tree managed by this server.</p>
 
 <div class="stat-grid">
     <div class="stat-card">
-        <div class="label">Total Secrets</div>
+        <div class="label">Secrets</div>
         <div class="value">{{.TotalSecrets}}</div>
+    </div>
+    <div class="stat-card">
+        <div class="label">Groups</div>
+        <div class="value">{{.TotalGroups}}</div>
     </div>
     <div class="stat-card">
         <div class="label">Access Policies</div>
         <div class="value">{{.TotalPolicies}}</div>
     </div>
-    <div class="stat-card">
-        <div class="label">Environments</div>
-        <div class="value">{{.TotalEnvironments}}</div>
+    <div class="stat-card {{if gt .UnreachableCount 0}}warn{{end}}">
+        <div class="label">Unreachable nodes</div>
+        <div class="value">{{.UnreachableCount}}</div>
     </div>
 </div>
 
-{{if .Projects}}
-<h2 style="margin-bottom: 0.5rem;">Secrets by Project</h2>
-<table>
-    <thead>
-        <tr>
-            <th>Project</th>
-            <th>Environment</th>
-            <th>Secrets</th>
-        </tr>
-    </thead>
-    <tbody>
-        {{range .Projects}}
-        <tr>
-            <td>{{.Project}}</td>
-            <td>{{.Environment}}</td>
-            <td>{{.SecretCount}}</td>
-        </tr>
-        {{end}}
-    </tbody>
-</table>
+{{if gt .UnreachableCount 0}}
+<p class="page-desc"><strong>{{.UnreachableCount}}</strong> node(s) have no effective policies attached (no policies at the node itself or on any ancestor), so GitHub Actions cannot see them. <a href="{{prefix}}/secrets">Review the tree</a> to attach policies.</p>
+{{end}}
+
+{{if .Roots}}
+<h2 class="section-heading">Secret tree</h2>
+{{template "nodeTree" .Roots}}
 {{else}}
-<p class="empty">No secrets yet. <a href="{{prefix}}/secrets/new">Create one</a>.</p>
+<p class="empty">No nodes yet. <a href="{{prefix}}/secrets/new">Create one</a>.</p>
 {{end}}
 
 {{template "foot" .}}

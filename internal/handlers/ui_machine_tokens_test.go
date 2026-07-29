@@ -1,0 +1,260 @@
+package handlers
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestUIMachineTokenPages(t *testing.T) {
+	env := setup(t)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	for _, path := range []string{"/admin/machine-tokens", "/admin/machine-tokens/new"} {
+		req := httptest.NewRequest("GET", path, nil)
+		rr := httptest.NewRecorder()
+		mux.ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusOK, rr.Code, "GET %s", path)
+	}
+}
+
+func TestUIMachineTokenCreateAndDelete(t *testing.T) {
+	env := setup(t)
+	s, err := env.db.CreateSecret(nil, "API_KEY", "v")
+	require.Nil(t, err)
+
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	form := "name=reconcile&node_ids=" + s.ID() + "&can_attest_github_pushes=on"
+	req := httptest.NewRequest("POST", "/admin/machine-tokens", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	// Success renders the show-once page (not a redirect) with the token visible.
+	require.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Body.String(), "sst_")
+
+	tokens, err := env.db.ListMachineTokens()
+	require.NoError(t, err)
+	require.Equal(t, 1, len(tokens))
+	id := tokens[0].ID
+	assert.True(t, tokens[0].CanAttestGitHubPushes)
+
+	req = httptest.NewRequest("GET", "/admin/machine-tokens", nil)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Body.String(), "reconcile")
+
+	req = httptest.NewRequest("POST", "/admin/machine-tokens/"+id+"/delete", nil)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusSeeOther, rr.Code)
+
+	tokens, _ = env.db.ListMachineTokens()
+	assert.Equal(t, 0, len(tokens))
+}
+
+func TestUIMachineTokenCreateValidation(t *testing.T) {
+	env := setup(t)
+	s, _ := env.db.CreateSecret(nil, "S", "v")
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	// Missing name re-renders the form with an error, creating nothing.
+	req := httptest.NewRequest("POST", "/admin/machine-tokens", strings.NewReader("node_ids="+s.ID()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Body.String(), "Name is required")
+
+	// Name only, no secret and no policy: an unattached token is allowed
+	// (it simply vends nothing until you attach something later).
+	req = httptest.NewRequest("POST", "/admin/machine-tokens", strings.NewReader("name=unattached"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Body.String(), "sst_", "an unattached token is created and shown")
+
+	tokens, _ := env.db.ListMachineTokens()
+	require.Equal(t, 1, len(tokens))
+	nodes, _ := env.db.ListTokenNodes(tokens[0].ID)
+	assert.Empty(t, nodes, "the token has no attachments")
+}
+
+func TestUIMachineTokenEditAndUpdate(t *testing.T) {
+	env := setup(t)
+	a, _ := env.db.CreateSecret(nil, "A", "1")
+	b, _ := env.db.CreateSecret(nil, "B", "2")
+	_, rec, err := env.db.CreateMachineToken("t", nil, []string{a.ID()})
+	require.Nil(t, err)
+
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	// Edit form loads and pre-checks the currently-attached node.
+	req := httptest.NewRequest("GET", "/admin/machine-tokens/"+rec.ID+"/edit", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Body.String(), a.ID())
+
+	// Update to grant B instead of A.
+	req = httptest.NewRequest("POST", "/admin/machine-tokens/"+rec.ID, strings.NewReader("node_ids="+b.ID()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusSeeOther, rr.Code)
+
+	nodes, err := env.db.ListTokenNodes(rec.ID)
+	require.Nil(t, err)
+	require.Equal(t, 1, len(nodes))
+	assert.Equal(t, "B", nodes[0].Name)
+}
+
+func TestUIMachineTokenUpdateCanClearAttachments(t *testing.T) {
+	env := setup(t)
+	s, _ := env.db.CreateSecret(nil, "S", "v")
+	_, rec, err := env.db.CreateMachineToken("t", nil, []string{s.ID()})
+	require.Nil(t, err)
+
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	// Posting no nodes and no policy clears the grant and redirects (an
+	// unattached token is allowed).
+	req := httptest.NewRequest("POST", "/admin/machine-tokens/"+rec.ID, strings.NewReader("name=t"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusSeeOther, rr.Code)
+
+	nodes, _ := env.db.ListTokenNodes(rec.ID)
+	assert.Empty(t, nodes, "the attachments were cleared")
+}
+
+func TestUIEditNonexistentMachineToken(t *testing.T) {
+	env := setup(t)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	req := httptest.NewRequest("GET", "/admin/machine-tokens/00000000-0000-0000-0000-000000000000/edit", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+func TestUIDeleteNonexistentMachineToken(t *testing.T) {
+	env := setup(t)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	req := httptest.NewRequest("POST", "/admin/machine-tokens/00000000-0000-0000-0000-000000000000/delete", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+func TestUIMachineTokenRegenerate(t *testing.T) {
+	env := setup(t)
+	s, _ := env.db.CreateSecret(nil, "S", "v")
+	oldToken, rec, err := env.db.CreateMachineToken("rotate-me", nil, []string{s.ID()})
+	require.Nil(t, err)
+
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	req := httptest.NewRequest("POST", "/admin/machine-tokens/"+rec.ID+"/regenerate", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	// Success renders the show-once page with the new token and the name.
+	require.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Body.String(), "sst_")
+	assert.Contains(t, rr.Body.String(), "rotate-me")
+	assert.Contains(t, rr.Body.String(), "Regenerated")
+	assert.NotContains(t, rr.Body.String(), oldToken, "the page shows the new token, never the old one")
+
+	// The old token stopped working the moment it was replaced.
+	got, err := env.db.LookupMachineToken(oldToken)
+	require.Nil(t, err)
+	assert.Nil(t, got)
+}
+
+func TestUIRegenerateNonexistentMachineToken(t *testing.T) {
+	env := setup(t)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	req := httptest.NewRequest("POST", "/admin/machine-tokens/00000000-0000-0000-0000-000000000000/regenerate", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+func TestUIRegenerateMachineTokenDBError(t *testing.T) {
+	env := setupClosedMainDB(t)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	req := httptest.NewRequest("POST", "/admin/machine-tokens/00000000-0000-0000-0000-000000000000/regenerate", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+}
+
+func TestUIListMachineTokensDBError(t *testing.T) {
+	env := setupClosedMainDB(t)
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	req := httptest.NewRequest("GET", "/admin/machine-tokens", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+}
+
+func TestUIMachineTokenCreateWithPolicy(t *testing.T) {
+	env := setup(t)
+	p, err := env.db.CreatePolicy("pol", nil, nil, nil)
+	require.Nil(t, err)
+	s, _ := env.db.CreateSecret(nil, "VIA_POLICY", "pv")
+	require.Nil(t, env.db.AttachPolicy(s.ID(), p.ID))
+
+	h := NewUIHandler(env.db, env.audit, env.tmpl)
+	mux := chi.NewRouter()
+	h.Register(mux)
+
+	// Bind a policy with no direct nodes — the token is valid (it grants via the policy).
+	form := "name=t&policy_id=" + p.ID
+	req := httptest.NewRequest("POST", "/admin/machine-tokens", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Body.String(), "sst_")
+
+	tokens, _ := env.db.ListMachineTokens()
+	require.Equal(t, 1, len(tokens))
+	require.NotNil(t, tokens[0].PolicyID)
+	assert.Equal(t, p.ID, *tokens[0].PolicyID)
+}

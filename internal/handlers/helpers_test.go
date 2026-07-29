@@ -12,11 +12,11 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
+	"github.com/stretchr/testify/require"
 	"github.com/wow-look-at-my/secret-server/internal/auth"
 	"github.com/wow-look-at-my/secret-server/internal/crypto"
 	"github.com/wow-look-at-my/secret-server/internal/database"
 	"github.com/wow-look-at-my/secret-server/internal/templates"
-	"github.com/wow-look-at-my/testify/require"
 )
 
 type testEnv struct {
@@ -40,8 +40,8 @@ func setup(t *testing.T) *testEnv {
 
 	f, err := os.CreateTemp(t.TempDir(), "test-*.db")
 	require.Nil(t, err)
-
 	f.Close()
+
 	db, err := database.New(f.Name(), enc)
 	require.Nil(t, err)
 
@@ -63,32 +63,11 @@ func setup(t *testing.T) *testEnv {
 	oidc := auth.NewGitHubOIDCValidator("https://secrets.example.com")
 	auth.SetJWKSForTesting(oidc, &jose.JSONWebKeySet{Keys: []jose.JSONWebKey{pub}})
 
-	// Pre-create common environments used by handler tests.
-	for _, pair := range [][2]string{
-		{"app", "prod"}, {"app", "staging"}, {"app", "dev"},
-		{"proj", "prod"}, {"proj", "dev"}, {"proj", "env"},
-		{"testproj", "staging"}, {"other", "prod"},
-		{"myapp", "prod"},
-	} {
-		db.CreateEnvironment(pair[0], pair[1])
-	}
-
 	return &testEnv{db: db, audit: auditDB, tmpl: tmpl, key: rsaKey, jwk: jwk, pub: pub, oidc: oidc}
 }
 
-// envID returns the environment ID for a project+environment pair, for use in form tests.
-func (e *testEnv) envID(t *testing.T, project, environment string) string {
-	t.Helper()
-	envs, err := e.db.ListEnvironments()
-	require.Nil(t, err)
-	for _, env := range envs {
-		if env.Project == project && env.Environment == environment {
-			return env.ID
-		}
-	}
-	t.Fatalf("environment %s/%s not found in test setup", project, environment)
-	return ""
-}
+// strPtr is a test helper for building *string values.
+func strPtr(s string) *string { return &s }
 
 func setupClosedDB(t *testing.T) *testEnv {
 	t.Helper()
@@ -113,6 +92,10 @@ func jsonReq(method, target, body string) *http.Request {
 }
 
 func makeOIDCToken(t *testing.T, jwk jose.JSONWebKey, repo, ref string) string {
+	return makeOIDCTokenWithActor(t, jwk, repo, ref, "deploy-bot")
+}
+
+func makeOIDCTokenWithActor(t *testing.T, jwk jose.JSONWebKey, repo, ref, actor string) string {
 	t.Helper()
 	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: jwk}, (&jose.SignerOptions{}).WithType("JWT"))
 	require.Nil(t, err)
@@ -128,11 +111,17 @@ func makeOIDCToken(t *testing.T, jwk jose.JSONWebKey, repo, ref string) string {
 	customClaims := struct {
 		Repository      string `json:"repository"`
 		RepositoryOwner string `json:"repository_owner"`
+		Actor           string `json:"actor"`
+		ActorID         string `json:"actor_id"`
 		Ref             string `json:"ref"`
+		SHA             string `json:"sha"`
 	}{
 		Repository:      repo,
 		RepositoryOwner: strings.Split(repo, "/")[0],
+		Actor:           actor,
+		ActorID:         "583231",
 		Ref:             ref,
+		SHA:             strings.Repeat("a", 40),
 	}
 	token, err := jwt.Signed(signer).Claims(stdClaims).Claims(customClaims).Serialize()
 	require.Nil(t, err)
