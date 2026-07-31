@@ -329,12 +329,10 @@ func (d *DB) LookupMachineToken(token string) (*MachineToken, error) {
 		row.TokenPrefix,
 		row.PolicyID,
 		row.PolicyName,
+		row.CanAttestGithubPushes,
 		row.CreatedAt,
 		row.LastUsedAt,
 	)
-	if err := d.loadMachineTokenGitHubAttestation(rec); err != nil {
-		return nil, err
-	}
 	return rec, nil
 }
 
@@ -353,18 +351,16 @@ func (d *DB) GetMachineToken(id string) (*MachineToken, error) {
 		row.TokenPrefix,
 		row.PolicyID,
 		row.PolicyName,
+		row.CanAttestGithubPushes,
 		row.CreatedAt,
 		row.LastUsedAt,
 	)
-	if err := d.loadMachineTokenGitHubAttestation(rec); err != nil {
-		return nil, err
-	}
 	return rec, nil
 }
 
 // machineTokenFromRow builds a MachineToken from the columns every token query
 // returns, normalizing the nullable policy binding and last_used_at.
-func machineTokenFromRow(id, name, prefix string, policyID, policyName sql.NullString, createdAt time.Time, lastUsed sql.NullTime) *MachineToken {
+func machineTokenFromRow(id, name, prefix string, policyID, policyName sql.NullString, canAttestGitHubPushes int64, createdAt time.Time, lastUsed sql.NullTime) *MachineToken {
 	rec := &MachineToken{
 		ID:          id,
 		Name:        name,
@@ -373,20 +369,14 @@ func machineTokenFromRow(id, name, prefix string, policyID, policyName sql.NullS
 		PolicyName:  nullStringToPtr(policyName),
 		CreatedAt:   createdAt,
 	}
+	if canAttestGitHubPushes != 0 {
+		rec.CanAttestGitHubPushes = true
+	}
 	if lastUsed.Valid {
 		t := lastUsed.Time
 		rec.LastUsedAt = &t
 	}
 	return rec
-}
-
-func (d *DB) loadMachineTokenGitHubAttestation(rec *MachineToken) error {
-	enabled, err := d.MachineTokenCanAttestGitHubPushes(context.Background(), rec.ID)
-	if err != nil {
-		return err
-	}
-	rec.CanAttestGitHubPushes = enabled
-	return nil
 }
 
 // ListTokenNodes returns the secret-tree nodes attached to a token (for display
@@ -467,12 +457,10 @@ func (d *DB) ListMachineTokens() ([]MachineToken, error) {
 			r.TokenPrefix,
 			r.PolicyID,
 			r.PolicyName,
+			r.CanAttestGithubPushes,
 			r.CreatedAt,
 			r.LastUsedAt,
 		)
-		if err := d.loadMachineTokenGitHubAttestation(rec); err != nil {
-			return nil, err
-		}
 		tokens[i] = *rec
 	}
 	return tokens, nil

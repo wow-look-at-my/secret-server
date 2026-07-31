@@ -80,20 +80,21 @@ func (q *Queries) DeleteTokenNodes(ctx context.Context, tokenID string) error {
 }
 
 const getMachineToken = `-- name: GetMachineToken :one
-SELECT t.id, t.name, t.token_prefix, t.policy_id, p.name AS policy_name, t.created_at, t.last_used_at
+SELECT t.id, t.name, t.token_prefix, t.policy_id, p.name AS policy_name, t.can_attest_github_pushes, t.created_at, t.last_used_at
 FROM machine_tokens t
 LEFT JOIN access_policies p ON p.id = t.policy_id
 WHERE t.id = ?
 `
 
 type GetMachineTokenRow struct {
-	ID          string
-	Name        string
-	TokenPrefix string
-	PolicyID    sql.NullString
-	PolicyName  sql.NullString
-	CreatedAt   time.Time
-	LastUsedAt  sql.NullTime
+	ID                    string
+	Name                  string
+	TokenPrefix           string
+	PolicyID              sql.NullString
+	PolicyName            sql.NullString
+	CanAttestGithubPushes int64
+	CreatedAt             time.Time
+	LastUsedAt            sql.NullTime
 }
 
 func (q *Queries) GetMachineToken(ctx context.Context, id string) (GetMachineTokenRow, error) {
@@ -105,6 +106,7 @@ func (q *Queries) GetMachineToken(ctx context.Context, id string) (GetMachineTok
 		&i.TokenPrefix,
 		&i.PolicyID,
 		&i.PolicyName,
+		&i.CanAttestGithubPushes,
 		&i.CreatedAt,
 		&i.LastUsedAt,
 	)
@@ -112,20 +114,21 @@ func (q *Queries) GetMachineToken(ctx context.Context, id string) (GetMachineTok
 }
 
 const getMachineTokenByHash = `-- name: GetMachineTokenByHash :one
-SELECT t.id, t.name, t.token_prefix, t.policy_id, p.name AS policy_name, t.created_at, t.last_used_at
+SELECT t.id, t.name, t.token_prefix, t.policy_id, p.name AS policy_name, t.can_attest_github_pushes, t.created_at, t.last_used_at
 FROM machine_tokens t
 LEFT JOIN access_policies p ON p.id = t.policy_id
 WHERE t.token_hash = ?
 `
 
 type GetMachineTokenByHashRow struct {
-	ID          string
-	Name        string
-	TokenPrefix string
-	PolicyID    sql.NullString
-	PolicyName  sql.NullString
-	CreatedAt   time.Time
-	LastUsedAt  sql.NullTime
+	ID                    string
+	Name                  string
+	TokenPrefix           string
+	PolicyID              sql.NullString
+	PolicyName            sql.NullString
+	CanAttestGithubPushes int64
+	CreatedAt             time.Time
+	LastUsedAt            sql.NullTime
 }
 
 func (q *Queries) GetMachineTokenByHash(ctx context.Context, tokenHash string) (GetMachineTokenByHashRow, error) {
@@ -137,6 +140,7 @@ func (q *Queries) GetMachineTokenByHash(ctx context.Context, tokenHash string) (
 		&i.TokenPrefix,
 		&i.PolicyID,
 		&i.PolicyName,
+		&i.CanAttestGithubPushes,
 		&i.CreatedAt,
 		&i.LastUsedAt,
 	)
@@ -144,20 +148,21 @@ func (q *Queries) GetMachineTokenByHash(ctx context.Context, tokenHash string) (
 }
 
 const listMachineTokens = `-- name: ListMachineTokens :many
-SELECT t.id, t.name, t.token_prefix, t.policy_id, p.name AS policy_name, t.created_at, t.last_used_at
+SELECT t.id, t.name, t.token_prefix, t.policy_id, p.name AS policy_name, t.can_attest_github_pushes, t.created_at, t.last_used_at
 FROM machine_tokens t
 LEFT JOIN access_policies p ON p.id = t.policy_id
 ORDER BY t.created_at DESC
 `
 
 type ListMachineTokensRow struct {
-	ID          string
-	Name        string
-	TokenPrefix string
-	PolicyID    sql.NullString
-	PolicyName  sql.NullString
-	CreatedAt   time.Time
-	LastUsedAt  sql.NullTime
+	ID                    string
+	Name                  string
+	TokenPrefix           string
+	PolicyID              sql.NullString
+	PolicyName            sql.NullString
+	CanAttestGithubPushes int64
+	CreatedAt             time.Time
+	LastUsedAt            sql.NullTime
 }
 
 func (q *Queries) ListMachineTokens(ctx context.Context) ([]ListMachineTokensRow, error) {
@@ -175,6 +180,7 @@ func (q *Queries) ListMachineTokens(ctx context.Context) ([]ListMachineTokensRow
 			&i.TokenPrefix,
 			&i.PolicyID,
 			&i.PolicyName,
+			&i.CanAttestGithubPushes,
 			&i.CreatedAt,
 			&i.LastUsedAt,
 		); err != nil {

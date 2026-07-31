@@ -55,29 +55,6 @@ func (d *DB) SetMachineTokenGitHubAttestation(
 	return nil
 }
 
-// MachineTokenCanAttestGitHubPushes checks the dedicated capability on a
-// previously authenticated machine token.
-func (d *DB) MachineTokenCanAttestGitHubPushes(
-	ctx context.Context,
-	id string,
-) (bool, error) {
-	var enabled int
-	err := d.db.QueryRowContext(
-		ctx,
-		`SELECT can_attest_github_pushes
-		 FROM machine_tokens
-		 WHERE id = ?`,
-		id,
-	).Scan(&enabled)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, ErrNotFound
-	}
-	if err != nil {
-		return false, fmt.Errorf("read machine token GitHub attestation permission: %w", err)
-	}
-	return enabled == 1, nil
-}
-
 // StoreGitHubPushProvenance upserts the identity for the exact ref state. A
 // later push of the same SHA to the same ref intentionally replaces the older
 // pusher because it is the event that can trigger the current workflow run.

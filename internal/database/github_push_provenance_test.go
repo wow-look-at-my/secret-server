@@ -134,6 +134,7 @@ func TestMachineTokenGitHubAttestationUnknownToken(t *testing.T) {
 	err := db.SetMachineTokenGitHubAttestation(ctx, "missing", true)
 	assert.ErrorIs(t, err, ErrNotFound)
 
-	_, err = db.MachineTokenCanAttestGitHubPushes(ctx, "missing")
-	assert.ErrorIs(t, err, ErrNotFound)
+	rec, err := db.GetMachineToken("missing")
+	assert.NoError(t, err)
+	assert.Nil(t, rec, "unknown token must return nil")
 }
