@@ -9,7 +9,7 @@ require (
 	github.com/gorilla/csrf v1.7.3
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/crypto v0.50.0
-	modernc.org/sqlite v1.54.0
+	modernc.org/sqlite v1.55.0
 )
 
 require (
