@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/wow-look-at-my/secret-server/client"
 	"github.com/wow-look-at-my/secret-server/internal/auth"
 	"github.com/wow-look-at-my/secret-server/internal/database"
 )
@@ -22,7 +23,9 @@ func NewPublicHandler(db *database.DB, audit *database.AuditDB, oidc *auth.GitHu
 }
 
 func (h *PublicHandler) Register(r chi.Router) {
-	r.Get(GitHubPrefix+"/secrets", h.fetchSecrets)
+	// The published client compiles this path in, so serve the symbol it
+	// requests rather than a second spelling that can drift from it.
+	r.Get(client.SecretsPath, h.fetchSecrets)
 	r.Head(GitHubPrefix+"/push-provenance", h.preflightGitHubPushAttestation)
 	r.Post(GitHubPrefix+"/push-provenance", h.attestGitHubPushes)
 }
