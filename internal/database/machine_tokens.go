@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/wow-look-at-my/secret-server/client"
 	sqlcdb "github.com/wow-look-at-my/secret-server/internal/database/sqlc"
 )
 
@@ -20,7 +21,11 @@ import (
 // GitHub OIDC JWT). It is part of the token string and lets the secrets
 // endpoint pick the right validation path by inspecting the token, so both
 // credential types can share one route. "sst" = secret-server token.
-const MachineTokenPrefix = "sst_"
+//
+// It is defined in the published client package: consumers have to know the
+// prefix to build a credential, so the value they compile against and the one
+// this server mints must be the same symbol, not two copies that can drift.
+const MachineTokenPrefix = client.MachineTokenPrefix
 
 // machineTokenRandomBytes is the entropy in a freshly minted token (before the
 // prefix). 32 bytes is far beyond brute-force reach for a bearer credential.
