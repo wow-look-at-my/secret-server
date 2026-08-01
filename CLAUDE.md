@@ -34,6 +34,7 @@ reference the admin UI prefix.
 
 ## Key packages
 
+- `client` — the published Go client, and the repo's ONLY exported package. Owns the wire contract: `MachineTokenPrefix` and `SecretsPath` live here and the server takes them from it, so a consumer cannot drift from what this server mints and serves. Depth: [docs/go-client.md](docs/go-client.md).
 - `cmd/server` — entrypoint, chi router wiring, gorilla/csrf middleware
 - `internal/auth` — CF Access JWT + GitHub OIDC validation
 - `internal/config` — env var loading (derives CSRF key from ENCRYPTION_KEY via HKDF)
