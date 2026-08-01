@@ -33,6 +33,30 @@ Machine-token example:
     curl -fsSL -H "Authorization: Bearer $SECRET_SERVER_TOKEN" \
       {{BASE_URL}}/github/v1/secrets
 
+## Go client library
+
+Go consumers should import the client rather than hand-roll the request:
+
+    import secretserver "github.com/wow-look-at-my/secret-server/client"
+
+    c, err := secretserver.NewMachineToken(os.Getenv("SECRET_SERVER_TOKEN"))
+    secrets := secretserver.NewCache(c, 0)             // 0 = 15m TTL
+    token, err := secrets.Secret(ctx, "PRIVATE_ORG_REPO_READ")
+
+`New(token, ...)` takes either credential type; `NewMachineToken` additionally
+requires the `sst_` prefix, so a deployment handed the wrong credential fails at
+construction instead of as an unexplained 401 later. Options: `WithBaseURL`
+(defaults to this instance), `WithHTTPClient`. `Client.Fetch` returns the whole
+authorized set as `map[string]string`; `Cache` adds a TTL so a rotated secret
+heals without a redeploy, and deliberately does NOT cache failures so a restart
+during an outage recovers by itself. A name the credential is not authorized for
+returns `ErrNotEntitled` (match with `errors.Is`) rather than an empty string --
+that is a configuration answer, distinct from a transport failure. Secret values
+never appear in an error string. The package has no dependencies beyond the
+standard library, and it is where `MachineTokenPrefix` and the route path are
+defined -- the server takes both from it, so a client cannot drift from the
+server that ships it.
+
 The Agent Host control plane also uses HEAD/POST
 `{{BASE_URL}}/github/v1/push-provenance` with a machine token whose separate
 push-attestation capability is enabled. That route is not for workflows or
