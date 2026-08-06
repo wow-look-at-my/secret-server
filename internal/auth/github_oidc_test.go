@@ -297,3 +297,46 @@ func TestValidateTokenInvalidJWT(t *testing.T) {
 	require.NotNil(t, err)
 	assert.Contains(t, err.Error(), "parse JWT")
 }
+
+// A validator with no audience must refuse every token. Skipping the audience
+// check would accept tokens a workflow minted for any OTHER service, which is
+// exactly the cross-service replay the aud claim exists to stop.
+func TestValidateTokenEmptyAudienceFailsClosed(t *testing.T) {
+	key, _ := rsa.GenerateKey(rand.Reader, 2048)
+	jwk := jose.JSONWebKey{Key: key, KeyID: "kid-empty-aud", Algorithm: "RS256"}
+	pubJWK := jose.JSONWebKey{Key: &key.PublicKey, KeyID: "kid-empty-aud", Algorithm: "RS256"}
+
+	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: jwk}, (&jose.SignerOptions{}).WithType("JWT"))
+	require.NoError(t, err)
+
+	// A wholly valid token, except it was minted for somebody else.
+	stdClaims := jwt.Claims{
+		Issuer:   "https://token.actions.githubusercontent.com",
+		Audience: jwt.Audience{"https://some-other-service.example.com"},
+		Expiry:   jwt.NewNumericDate(time.Now().Add(time.Hour)),
+	}
+	customClaims := struct {
+		Repository string `json:"repository"`
+		Ref        string `json:"ref"`
+		SHA        string `json:"sha"`
+		Actor      string `json:"actor"`
+		ActorID    string `json:"actor_id"`
+	}{
+		Repository: "myorg/myrepo",
+		Ref:        "refs/heads/main",
+		SHA:        "abc123",
+		Actor:      "octocat",
+		ActorID:    "583231",
+	}
+	token, err := jwt.Signed(signer).Claims(stdClaims).Claims(customClaims).Serialize()
+	require.NoError(t, err)
+
+	v := NewGitHubOIDCValidator("")
+	v.jwks = &jose.JSONWebKeySet{Keys: []jose.JSONWebKey{pubJWK}}
+	v.fetched = time.Now()
+	v.jwksURL = "cached"
+
+	_, err = v.ValidateToken(context.Background(), token)
+	require.Error(t, err, "an empty audience must reject tokens, not accept every one")
+	assert.Contains(t, err.Error(), "audience")
+}
