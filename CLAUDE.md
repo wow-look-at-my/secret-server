@@ -46,8 +46,12 @@ reference the admin UI prefix.
 
 ## Configuration
 
-All via environment variables. Required: `ENCRYPTION_KEY`, `CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_ADMIN_AUDIENCE`. See README.md for full table.
+All via environment variables. Required: `ENCRYPTION_KEY`, `CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_ADMIN_AUDIENCE`, `OIDC_AUDIENCE` — `config.Load` fails loud on each. `.env.example` is the template docker-compose reads; it is deliberately exempted from the `.env.*` ignore rule.
+
+## Public repo
+
+This repo is public: the `client` package is meant to be imported by other projects. MIT (`LICENSE`); vulnerability reporting and the security model in `SECURITY.md`. Nothing here may carry a real secret, hostname-derived credential, or private-module dependency — the `client` package must stay stdlib-only so consumers inherit nothing.
 
 ## CI
 
-Downloads `go-toolchain` binary in CI and runs it. Triggered on every push. No PRs merge without passing CI.
+Two jobs on every push (`.github/workflows/ci.yml`). `build` runs the `go-toolchain` action. `secret-scan` runs gitleaks over **full history** (`fetch-depth: 0`) and fails the job on any finding, redacted so a hit never reprints the value into a public log. No PRs merge without passing CI.

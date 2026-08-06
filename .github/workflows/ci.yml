@@ -19,3 +19,23 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: wow-look-at-my/go-toolchain@v1
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # Full history: a secret is just as exposed in an old commit as in HEAD.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: wow-look-at-my/actions@typescript#latest
+        with:
+          script: |
+            const version = '8.28.0';
+            const tarball = `gitleaks_${version}_linux_x64.tar.gz`;
+            await $`curl -fsSL -o /tmp/${tarball} https://github.com/gitleaks/gitleaks/releases/download/v${version}/${tarball}`;
+            await $`tar -xzf /tmp/${tarball} -C /tmp gitleaks`;
+            // --redact so a hit never reprints the secret into a public log.
+            // Non-zero exit on any finding fails the job.
+            await $`/tmp/gitleaks git --no-banner --redact --exit-code 1 .`;
