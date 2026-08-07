@@ -78,12 +78,15 @@ func (v *GitHubOIDCValidator) ValidateToken(ctx context.Context, tokenString str
 		return nil, fmt.Errorf("verify claims: %w", err)
 	}
 
-	expected := jwt.Expected{
-		Issuer: "https://token.actions.githubusercontent.com",
-		Time:   time.Now(),
+	// No audience means no recipient binding: a token a workflow minted for any
+	// other service would validate here. Refuse rather than downgrade silently.
+	if v.audience == "" {
+		return nil, fmt.Errorf("validate standard claims: no expected audience configured")
 	}
-	if v.audience != "" {
-		expected.AnyAudience = []string{v.audience}
+	expected := jwt.Expected{
+		Issuer:      "https://token.actions.githubusercontent.com",
+		Time:        time.Now(),
+		AnyAudience: []string{v.audience},
 	}
 	if err := stdClaims.Validate(expected); err != nil {
 		return nil, fmt.Errorf("validate standard claims: %w", err)
