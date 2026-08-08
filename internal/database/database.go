@@ -43,6 +43,13 @@ func (d *DB) Close() error {
 	return d.db.Close()
 }
 
+// Ping reports whether the database still answers. Used by the update-liveness
+// endpoint: a process serving HTTP over a dead database is exactly the state a
+// post-update health gate exists to catch, and an HTTP 200 alone cannot see it.
+func (d *DB) Ping(ctx context.Context) error {
+	return d.db.PingContext(ctx)
+}
+
 // migrate runs all database-schema migrations in order. It is safe to call
 // on a fresh database (all CREATE TABLEs are IF NOT EXISTS) and safe to call
 // on a database from any prior schema version — the legacy converter detects
