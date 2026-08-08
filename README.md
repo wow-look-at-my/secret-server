@@ -168,5 +168,21 @@ never belongs in an agent session.
 | [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite) | BSD-3-Clause | Pure-Go SQLite driver |
 | [github.com/google/uuid](https://pkg.go.dev/github.com/google/uuid) | BSD-3-Clause | UUID generation |
 | [github.com/go-jose/go-jose/v4](https://pkg.go.dev/github.com/go-jose/go-jose/v4) | Apache-2.0 | JWT/JWKS validation |
+| [github.com/go-chi/chi/v5](https://pkg.go.dev/github.com/go-chi/chi/v5) | MIT | HTTP router |
+| [github.com/gorilla/csrf](https://pkg.go.dev/github.com/gorilla/csrf) | BSD-3-Clause | CSRF protection for the admin UI |
+| [golang.org/x/crypto](https://pkg.go.dev/golang.org/x/crypto) | BSD-3-Clause | HKDF for the derived CSRF key |
+| [github.com/stretchr/testify](https://pkg.go.dev/github.com/stretchr/testify) | MIT | Test assertions (tests only) |
 
-All other functionality uses the Go standard library.
+Everything else uses the Go standard library. The `client` package on its own
+imports **nothing outside the standard library** — importing it drags none of
+the above into your build.
+
+## Security
+
+Vulnerability reporting, the security model, and the operator responsibilities
+the threat model assumes are in [SECURITY.md](SECURITY.md). Report privately
+through the repository's Security tab, never as a public issue.
+
+## License
+
+[MIT](LICENSE).
