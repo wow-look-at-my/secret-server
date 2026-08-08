@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"os"
 	"runtime/debug"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	gorillacsrf "github.com/gorilla/csrf"
@@ -133,6 +135,30 @@ func buildMux(db *database.DB, auditDB *database.AuditDB, cfg *config.Config) (c
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
+	})
+
+	// The update-liveness contract docker-updater probes on the container's own
+	// port, reading only the status code (RFC 8615 reserves /.well-known/ for
+	// exactly this). Registered here, outside both CF Access groups, for the
+	// same reason /health is: the prober carries no credential, and a 401 would
+	// read as "serving but unhealthy" — the worst of both answers. CF Access
+	// needs a path bypass for /.well-known/* if it is ever probed from outside;
+	// docker-updater reaches the container directly on the Docker network.
+	r.Get("/.well-known/docker-updater/health", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := db.Ping(ctx); err != nil {
+			slog.Error("well-known health: database unreachable", "err", err)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+	// Nothing here outlives a request: secrets are read and written inside one,
+	// so a replacement container destroys no work in progress. Answering 200
+	// unconditionally is the honest answer, not a stub.
+	r.Get("/.well-known/docker-updater/pre-update", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
 	})
 
 	// Public llms.txt guide for LLMs/agents — like /health, not behind CF Access
