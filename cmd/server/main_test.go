@@ -67,6 +67,45 @@ func TestHealthEndpoint(t *testing.T) {
 	assert.Equal(t, "ok", rr.Body.String())
 }
 
+// docker-updater probes these two by itself, with no configuration, and reads
+// only the status code. They must answer without a credential: the prober has
+// none, and a 401 reads as "serving but unhealthy" rather than "not configured".
+func TestUpdateCheckEndpoints(t *testing.T) {
+	db, auditDB := testDB(t)
+	cfg := &config.Config{
+		CFAccessTeamDomain:    "team",
+		CFAccessAdminAudience: "aud",
+	}
+	mux, err := buildMux(db, auditDB, cfg)
+	require.Nil(t, err)
+
+	for _, path := range []string{
+		"/.well-known/docker-updater/health",
+		"/.well-known/docker-updater/pre-update",
+	} {
+		rr := httptest.NewRecorder()
+		mux.ServeHTTP(rr, httptest.NewRequest("GET", path, nil))
+		assert.Equal(t, http.StatusOK, rr.Code, path)
+	}
+}
+
+// The health endpoint's job is to notice what an HTTP 200 alone cannot: the
+// process still serving while the database behind it has stopped answering.
+func TestUpdateCheckHealthFailsOnDeadDatabase(t *testing.T) {
+	db, auditDB := testDB(t)
+	cfg := &config.Config{
+		CFAccessTeamDomain:    "team",
+		CFAccessAdminAudience: "aud",
+	}
+	mux, err := buildMux(db, auditDB, cfg)
+	require.Nil(t, err)
+	require.Nil(t, db.Close())
+
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest("GET", "/.well-known/docker-updater/health", nil))
+	assert.Equal(t, http.StatusServiceUnavailable, rr.Code)
+}
+
 func TestLlmsTxtEndpoint(t *testing.T) {
 	db, auditDB := testDB(t)
 	cfg := &config.Config{

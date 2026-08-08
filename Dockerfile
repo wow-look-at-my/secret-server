@@ -8,4 +8,10 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
 
 FROM gcr.io/distroless/static-debian12
 COPY --from=builder /secret-server /secret-server
+
+# Metadata only -- this publishes nothing on the host. It is what lets
+# docker-updater find the port serving /.well-known/docker-updater/ without a
+# per-deployment label.
+EXPOSE 8080
+
 ENTRYPOINT ["/secret-server"]
