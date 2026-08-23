@@ -26,7 +26,6 @@ jobs:
         with:
           images: ghcr.io/wow-look-at-my/secret-server
           tags: |
-            type=sha
             type=raw,value=latest,enable={{is_default_branch}}
 
       - uses: docker/build-push-action@v7
@@ -38,3 +37,10 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - uses: actions/delete-package-versions@v5
+        with:
+          package-name: secret-server
+          package-type: container
+          min-versions-to-keep: 5
+          delete-only-untagged-versions: true
