@@ -1,9 +1,10 @@
 services:
   secret-server:
     container_name: secret-server
+    restart: unless-stopped
     image: ghcr.io/wow-look-at-my/secret-server:latest
     volumes:
-      - data:/data
+      - ./data:/data
     environment:
       - LISTEN_ADDR=:8080
       - DATABASE_PATH=/data/secrets.db
@@ -13,11 +14,11 @@ services:
       - CF_ACCESS_ADMIN_AUDIENCE=${CF_ACCESS_ADMIN_AUDIENCE}
       - OIDC_AUDIENCE=${OIDC_AUDIENCE}
       - LOG_LEVEL=info
+    labels:
+      - docker-updater.enable=true
     networks:
       - nas-public-network
 
-volumes:
-  data:
 
 networks:
   nas-public-network:

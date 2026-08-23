@@ -206,6 +206,7 @@ func countNodeKinds(views []*nodeTemplateView) (groups, secrets int) {
 	}
 	return groups, secrets
 }
+}
 
 func (h *UIHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -496,3 +497,4 @@ func (h *UIHandler) auditLog(w http.ResponseWriter, r *http.Request) {
 		"PrevPage": page - 1,
 	})
 }
+

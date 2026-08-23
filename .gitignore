@@ -1,8 +1,11 @@
 /server
 /secret-server
 *.db
+*.db-shm
+*.db-wal
 *.exe
 /build/
+/data/
 .env
 .env.*
 !.env.example
